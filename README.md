@@ -14,15 +14,53 @@
 
 ## 왜 필요한가
 
-에이전트와 일하면 코드는 빨리 나온다. 대신 두 사람이 동시에 일하면 이런 일이 생긴다.
+가장 흔한 사고 하나로 설명한다.
+
+> 월요일 10시. amazon 이 자기 브랜치에서 `lib/api/user.ts` 의 `getUser` 가 `id` 를 받도록 바꾼다.
+> 11시. solp 의 Claude 가 main 기준으로 `getUser()` 를 호출하는 결제 페이지를 짠다.
+> 두 PR 은 각각 통과한다. 머지하면 깨진다.
+
+solp 의 Claude 는 알 방법이 없었다. amazon 의 브랜치를 보라고 아무도 안 시켰고, 봤다 해도 diff 수백 줄에서 "getUser 시그니처가 바뀌었다" 를 읽어내지 못한다.
+사람은 카톡으로 "getUser 바꿨어" 라고 말하면 되지만, **에이전트는 그 카톡을 못 본다.** 이게 문제의 전부다.
+
+같은 이유로 생기는 것들:
 
 | 상황 | 결과 |
 |---|---|
-| amazon 이 `getUser` 시그니처를 바꿨는데 solp 의 에이전트가 모른 채 그 위에 코드를 짠다 | 머지하면 깨진다. 머지 충돌보다 비싸고, 거의 매일 생긴다 |
-| 둘 다 `components/ui/button.tsx` 에 prop 을 추가한다. 둘 다 `package.json` 에 패키지를 넣는다 | 저녁에 머지할 때 한꺼번에 충돌 |
+| 상대가 바꾼 함수·컴포넌트·스키마 위에 모른 채 코드를 짠다 | 머지 후 깨짐. 머지 충돌보다 비싸고 거의 매일 생긴다 |
+| 둘 다 `components/ui/button.tsx` 에 prop 을 추가하고, 둘 다 `package.json` 에 패키지를 넣는다 | 저녁에 머지할 때 한꺼번에 충돌 |
 | solp 가 세션을 끝냈고, 내일 amazon 의 에이전트가 그 브랜치를 이어받는다 | 무엇이 남았는지, 왜 그렇게 했는지 아무 데도 없다 |
 
-핵심은 **에이전트끼리 소통이 안 된다** 는 것이다. 사람은 카톡으로 말하면 되지만, 에이전트는 그 카톡을 못 본다.
+## 그래서 어떻게 아는가
+
+**모든 정보는 GitHub 원격에 있는 파일과 ref 로만 오간다.** 채팅도 서버도 없다.
+amazon 쪽 훅이 세 가지를 원격에 올리고, solp 쪽 훅이 세션 시작 때와 수정 15회마다 `git fetch` 로 당겨와 읽는다.
+
+```
+amazon 쪽에서 일어나는 일              origin (GitHub)                      solp 쪽에서 읽는 것
+──────────────────────────           ─────────────────────               ──────────────────────────
+start-work: claim 커밋·push    ───▶  feat/settings 브랜치의          ──▶  "amazon · 사용자 설정 · 작업 중"
+                                     collab/active/…/claim.md
+
+훅이 수정 15회마다 작업 트리를  ───▶  refs/wip/amazon (숨은 ref,     ──▶  "지금 만지는 파일 (3분 전):
+커밋 객체로 만들어 push               브랜치 목록에 안 보임)               button.tsx, package.json"
+                                                                          → 내 파일과 겹치면 알림, 허브 파일이면 차단
+
+handoff: 저널 커밋·push        ───▶  feat/settings 브랜치의          ──▶  "changed lib/api/user.ts getUser 가
+                                     collab/journal/…amazon….md           id 를 받음 → 호출부 수정"
+                                                                          → 내 파일이 lib/api/user 를 import 하면 주입
+```
+
+그래서 "amazon 이 작업했는지" 는 이렇게 갈린다.
+
+- 아무것도 안 했다 → 원격에 아무것도 없다 → "없음".
+- 브랜치를 파고 claim 만 push 했다 → "작업 중, 목표는 X" 까지 보인다.
+- 한창 코딩 중이고 커밋은 안 했다 → wip 스냅샷 덕에 "지금 이 파일들 만지는 중" 이 보인다. 이벤트는 아직 없다.
+- handoff 까지 했다 → 저널 이벤트가 내 코드에 영향 있는 것만 걸러져서 보인다.
+- push 를 안 했다 → 안 보인다. 그래서 `start-work` 가 첫 커밋으로 push 하고, Stop 훅이 저널 없이 못 끝내게 한다.
+
+위 사고는 이렇게 끝난다. amazon 의 handoff 가 남긴 한 줄 `changed lib/api/user.ts getUser 가 id 를 받음 → 호출부는 id 를 넘길 것` 이
+solp 의 세션 시작 때 뜨고, solp 의 Claude 는 처음부터 `getUser(userId)` 로 짠다. 사람이 말해준 게 아무것도 없는데도.
 
 ## 핵심 가치 세 가지
 
