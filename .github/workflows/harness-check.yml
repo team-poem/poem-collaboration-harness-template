@@ -1,0 +1,35 @@
+name: harness-check
+on:
+  pull_request:
+  push:
+    branches: [main]
+jobs:
+  hooks:
+    name: 훅·루프 검증
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: sh tests/hooks.sh
+      - run: sh tests/loop.sh
+  collab:
+    name: 협업 규칙 검사
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - run: git fetch origin "${{ github.base_ref }}"
+      - run: sh scripts/collab.sh check --base "origin/${{ github.base_ref }}"
+        env: { GITHUB_HEAD_REF: "${{ github.head_ref }}" }
+  prune:
+    name: claim 정리 (main)
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions: { contents: write }
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - run: |
+          git config user.name harness-bot && git config user.email harness-bot@users.noreply.github.com
+          sh scripts/collab.sh prune
+          git diff --cached --quiet || { git commit -m "chore(collab): prune claims" && git push; }
