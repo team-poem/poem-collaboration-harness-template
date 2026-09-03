@@ -70,45 +70,208 @@ solp 의 세션 시작 때 뜨고, solp 의 Claude 는 처음부터 `getUser(use
 
 **3. 가볍다.** 훅 4개, 스킬 2개, 명령 1개. 사람이 외울 규칙은 셋이다. **시작에 claim, 끝에 저널, 남한테 할 말은 `ask @핸들`.** 훅은 POSIX 셸이고 LLM 을 부르지 않고 판단이 안 서면 통과시킨다. 훅이 못 잡은 건 CI 가 잡는다.
 
-## 어떻게 동작하는가
+## 어떻게 동작하는가 — 쇼핑몰을 처음 만드는 이틀
 
-하루를 따라가 보자. solp 가 결제 페이지를, amazon 이 사용자 설정을 만든다.
+solp 와 amazon 이 Next.js + Prisma 로 쇼핑몰을 처음부터 만든다. 훅이 언제 무엇을 하는지 전부 적는다.
+`[훅]` 표시가 하네스가 개입하는 순간이다. 그 외에는 평소처럼 Claude 와 일한다.
+
+### 0일차 — 프로젝트 만들기 (solp)
 
 ```
- 09:00  solp 가 claude 를 켠다
-        ┌─ 세션 시작 훅 ─────────────────────────────────────────────────┐
-        │ 나에게 온 질문      @amazon: 결제 웹훅이 세션 토큰을 읽나?        │
-        │ 영향 있는 이벤트    [changed] lib/api/user.ts getUser 가 id 를 받음 │
-        │                     [added] components/ui/toast.tsx 공용 토스트     │
-        │ 동료 작업 중        feat/settings · @amazon · 사용자 설정          │
-        │                     지금 만지는 파일 (12분 전): app/settings/…      │
-        └───────────────────────────────────────────────────────────────┘
-        에이전트는 getUser 호출부를 먼저 고치고, 토스트를 새로 만들지 않는다.
-
- 09:05  start-work  →  브랜치 feat/checkout + claim(goal 한 줄) + push
-        이 순간부터 amazon 의 세션에 "solp · 결제 페이지 · 작업 중" 이 보인다.
-
- 10:00  둘 다 components/ui/button.tsx 를 만진다 (커밋 전)
-        수정 15회마다 훅이 조용히 돈다(pulse):
-          내 작업 트리 스냅샷을 refs/wip/solp 로 올리고, amazon 것을 당겨온다
-        → "겹침: button.tsx 를 @amazon 도 만지는 중 (3분 전)"   ← 알림. 막지는 않는다
-        → package.json 이면                                       ← 허브 파일. 막는다
-          "차단: 지금 @amazon 이 만지는 중. 사용자에게 알리세요."
-
- 11:00  amazon 이 먼저 머지했다
-        다음 pulse 가 main 변경을 보고, 내 작업 트리가 깨끗하면 자동으로 rebase 한다.
-        충돌이면 되돌리고 알린다. 충돌은 30분 뒤에 만나면 사소하고 9시간 뒤에 만나면 사고다.
-
- 18:00  handoff  →  저널 한 파일 + claim status + 검사 + push
-        ## 이벤트
-        - changed lib/api/checkout.ts createOrder 가 userId 를 받음 → 호출부 수정
-        - reply @amazon 웹훅은 토큰을 읽지 않음
-        ## 남은 것
-        - 결제 확인 화면. 쿠키 도메인에서 막힘
-        저널 없이 끝내려 하면 Stop 훅이 한 번 세운다.
-
- 다음날 amazon 의 세션에 solp 의 changed 와 reply 가 뜬다. 사람이 설명한 게 없는데도.
+$ gh repo create team-poem/shop --template team-poem/poem-collaboration-harness-template --private
+$ git clone git@github.com:team-poem/shop && cd shop
+$ sh harness/init.sh shop solp
+  초기화 완료: shop · 나: @solp            ← 플레이스홀더 치환, git config collab.me solp, rerere 켬
 ```
+
+`harness/config.sh` 의 허브 파일을 이 프로젝트에 맞게 고친다. 두 사람이 동시에 고치면 반드시 충돌 나는 파일들이다.
+
+```sh
+HOTSPOTS="package.json pnpm-lock.yaml prisma/schema.prisma app/layout.tsx lib/db.ts"
+```
+
+Next.js 를 깔고 첫 커밋, push. amazon 은 클론 후 한 줄만 한다.
+
+```
+$ git clone git@github.com:team-poem/shop && cd shop
+$ git config collab.me amazon && git config rerere.enabled true
+```
+
+여기까지가 설정의 전부다. 이제 둘 다 `claude` 를 켠다.
+
+### 1일차 오전 — solp: 상품 목록
+
+```
+$ claude
+[훅 SessionStart] git fetch → 동료 브랜치·저널·wip 를 읽어 주입. 아직 아무것도 없다.
+  # 협업 현황 · 나: @solp · 브랜치: main
+  ## 내 claim        - 보호 브랜치. 코드 수정은 차단됩니다. 작업 시작은 Skill(start-work).
+  ## 동료 작업 중    - 없음
+
+solp: "상품 목록 페이지랑 상품 API 만들어줘. Product 모델도."
+
+Claude 가 app/products/page.tsx 를 쓰려 한다
+[훅 PreToolUse guard] 차단: 보호 브랜치(main)에서는 코드를 수정하지 않습니다. Skill(start-work) 로 …
+Claude → start-work:
+  git switch -c feat/products origin/main
+  collab/active/feat--products/claim.md   ← goal: 상품 목록 페이지 + 상품 API + Product 모델
+  git commit -m "chore(collab): claim feat/products" && git push -u origin HEAD
+  (이 순간부터 amazon 쪽 세션에 "feat/products · @solp · 작업 중" 이 보인다)
+
+Claude 가 prisma/schema.prisma 에 Product 모델 추가, lib/api/products.ts, app/products/page.tsx 작성
+[훅 PreToolUse guard] 매 수정마다 판정. claim 있음, 허브 파일(schema.prisma)이지만 지금 아무도 안 만지는 중 → 통과
+[훅 PostToolUse post-edit] 15번째 수정에서 pulse:
+  - 내 작업 트리(커밋 안 한 것 포함)를 커밋 객체로 만들어 refs/wip/solp 로 push   ← 브랜치 아님, 히스토리에 안 남음
+  - git fetch → 새 겹침·새 이벤트·main 변경 없음 → 조용
+```
+
+### 1일차 오전 — amazon: 장바구니
+
+```
+$ claude
+[훅 SessionStart]
+  # 협업 현황 · 나: @amazon · 브랜치: main
+  ## 동료 작업 중
+  - feat/products · @solp · active · 상품 목록 페이지 + 상품 API + Product 모델
+    지금 만지는 파일 (6분 전): prisma/schema.prisma lib/api/products.ts app/products/page.tsx
+       ↑ solp 가 커밋을 안 했는데도 보인다. refs/wip/solp 를 fetch 해서 main 과 diff 한 것
+
+amazon: "장바구니 만들어줘"
+Claude → start-work: feat/cart, claim "장바구니 담기·조회 + Cart 모델", push
+
+Claude 가 prisma/schema.prisma 에 Cart 모델을 추가하려 한다
+[훅 PreToolUse guard] 차단: prisma/schema.prisma 는 허브 파일이고 지금 @solp(작업 트리 6분 전)이 만지는 중입니다.
+  같은 파일을 동시에 고치면 머지 충돌이 납니다. 멈추고 사용자에게 알리세요. 상대가 끝나길 기다리는 게 원칙입니다.
+Claude → amazon: "solp 가 지금 스키마를 고치는 중이라 막혔습니다. solp 의 Product 가 머지된 뒤 그 위에 Cart 를 얹는 게 안전합니다.
+                 그동안 스키마가 필요 없는 장바구니 UI 부터 할까요?"
+amazon: "그래, UI 먼저"
+Claude 가 app/cart/page.tsx, components/cart/CartItem.tsx 작성 → 통과 (허브도 아니고 solp 가 안 만지는 파일)
+```
+
+### 1일차 점심 — solp 가 먼저 머지한다
+
+```
+solp: "여기까지 PR 올리자"
+Claude → handoff:
+  collab/journal/2026-09-03-solp-feat--products.md 를 새로 만든다
+    ## 이벤트
+    - added lib/api/products.ts getProduct(id), listProducts() → 상품 조회는 이걸 쓸 것
+    - migrated prisma/schema.prisma Product 모델 추가 → prisma generate 필요
+    - rule 서버 액션은 app/actions/ 아래에만 둔다
+    ## 남은 것
+    - 상품 이미지 업로드 미구현
+  claim status: done
+  scripts/collab.sh check → ✓ 규칙 위반 없음 · 통과
+  git push, gh pr create
+[CI] tests + collab.sh check 통과 → 머지
+[CI main push] collab.sh prune → 머지된 feat/products 의 claim 디렉토리 삭제
+```
+
+### 1일차 오후 — amazon 쪽에 solp 의 변경이 도착한다
+
+```
+amazon 이 계속 UI 를 만드는 중
+[훅 PostToolUse post-edit] 15번째 수정에서 pulse:
+  - refs/wip/amazon push
+  - git fetch → main 이 바뀜. 내 작업 트리가 깨끗함(방금 커밋함) → git rebase --autostash origin/main 자동 실행
+  → [협업 알림]
+    - main 이 갱신되어 자동으로 rebase 했습니다.
+    - [added] lib/api/products.ts getProduct(id), listProducts() → 상품 조회는 이걸 쓸 것 (@solp)
+    - [migrated] prisma/schema.prisma Product 모델 추가 → prisma generate 필요 (@solp)
+    - [rule] 서버 액션은 app/actions/ 아래에만 둔다 (@solp)
+       ↑ solp 저널의 이벤트 중 amazon 에게 영향 있는 것. added/migrated/rule 은 항상 주입된다
+Claude → amazon: "solp 의 Product 가 머지됐습니다. rebase 했고, prisma generate 돌리고 이제 Cart 모델을 얹겠습니다."
+
+Claude 가 prisma/schema.prisma 에 Cart 모델 추가
+[훅 PreToolUse guard] 허브 파일. 지금 만지는 사람 있나? → solp 의 브랜치는 머지됐으니 wip 에 schema 변경이 없다 → 통과
+Claude 가 lib/api/cart.ts 에서 getProduct(id) 를 import 해서 사용, app/actions/cart.ts 에 서버 액션 (rule 대로)
+
+amazon: "오늘은 여기까지"
+Claude 가 끝내려 한다
+[훅 Stop] 코드 변경이 있는데 오늘 내 저널이 없습니다. Skill(handoff) 로 … → Claude 가 멈추지 않고 handoff 를 한다
+Claude → handoff:
+  collab/journal/2026-09-03-amazon-feat--cart.md
+    ## 이벤트
+    - migrated prisma/schema.prisma Cart, CartItem 모델 추가 → prisma generate 필요
+    - added lib/api/cart.ts addToCart(productId), getCart() → 장바구니는 이걸 쓸 것
+    - ask @solp 상품 재고(stock)를 Product 에 둘 건가요, 별도 모델인가요? 장바구니 수량 검증에 필요
+    ## 남은 것
+    - 수량 변경 UI. 재고 검증은 solp 답 듣고
+  claim status: active
+  git push
+```
+
+### 2일차 아침 — solp: 상품 상세, 그리고 시그니처 변경
+
+```
+$ claude
+[훅 SessionStart]
+  ## 나에게 온 질문·메시지 (답은 내 저널 이벤트에 'reply @상대' 로)
+  - @amazon (feat/cart): @solp 상품 재고(stock)를 Product 에 둘 건가요, 별도 모델인가요? 장바구니 수량 검증에 필요
+  ## 동료 작업 중
+  - feat/cart · @amazon · active · 장바구니 담기·조회 + Cart 모델
+    지금 만지는 파일 (14시간 전): (없음 — 2시간 넘은 스냅샷은 "지금" 으로 치지 않는다)
+Claude → solp: "amazon 이 재고를 어디 둘지 묻습니다."
+solp: "Product 에 stock 컬럼으로. 그리고 상품 상세 페이지 만들어줘. URL 은 slug 로 가자."
+
+Claude → start-work: feat/product-detail, claim, push
+Claude 가 lib/api/products.ts 의 getProduct(id) 를 getProduct(slug) 로 바꾸고, prisma 에 stock, slug 추가, app/products/[slug]/page.tsx 작성
+[훅 PreToolUse guard] schema.prisma: amazon 의 wip 는 14시간 전이라 "지금" 아님 → 통과
+  (amazon 의 브랜치에 Cart 모델 변경이 커밋돼 있지만 아직 머지 전. 둘 중 나중에 머지되는 쪽이 rebase 한다 — check 가 알려준다)
+
+solp: "PR 올리자"
+Claude → handoff:
+  collab/journal/2026-09-04-solp-feat--product-detail.md
+    ## 이벤트
+    - changed lib/api/products.ts getProduct 가 id 대신 slug 를 받음 → 호출부는 product.slug 를 넘길 것
+    - migrated prisma/schema.prisma Product 에 slug(unique), stock 추가
+    - reply @amazon 재고는 Product.stock. 별도 모델 없음
+    ## 남은 것
+    - 없음
+  scripts/collab.sh check
+    ✓ 규칙 위반 없음
+    ! 다른 열린 브랜치와 같은 파일을 바꿈: prisma/schema.prisma(@amazon) — 먼저 머지되는 쪽이 이기고 나중 쪽이 rebase 한다
+  git push, gh pr create → 머지
+```
+
+### 2일차 오전 — amazon: 시그니처 변경이 도착하고, 충돌은 작게 끝난다
+
+```
+$ claude
+[훅 SessionStart]
+  ## 나에게 온 질문·메시지
+  - @solp (feat/product-detail): reply @amazon 재고는 Product.stock. 별도 모델 없음
+  ## 동료가 바꾼 것 중 나에게 영향 있는 이벤트
+  - [changed] lib/api/products.ts getProduct 가 id 대신 slug 를 받음 → 호출부는 product.slug 를 넘길 것 (@solp)
+       ↑ amazon 의 lib/api/cart.ts 가 lib/api/products 를 import 하고 있어서 골라진 것. 다른 사람 코드였으면 안 떴다
+  - [migrated] prisma/schema.prisma Product 에 slug(unique), stock 추가 (@solp)
+    → changed/migrated 는 내 코드가 깨졌을 수 있다는 뜻. 작업 전에 해당 호출부를 확인한다.
+Claude → amazon: "solp 가 getProduct 를 slug 기반으로 바꿨습니다. cart.ts 의 호출부 두 곳을 고쳐야 합니다.
+                 재고는 Product.stock 이라고 답이 왔습니다. 먼저 main 을 따라잡겠습니다."
+
+Claude: git rebase origin/main
+  → prisma/schema.prisma 충돌 (solp 의 slug/stock 과 amazon 의 Cart 모델이 같은 파일)
+  → 두 모델은 다른 위치라 Claude 가 양쪽 다 살려서 해결. rerere 가 기억해 둔다
+  → getProduct(id) 호출 두 곳을 getProduct(product.slug) 로, 수량 검증에 product.stock 사용
+[훅 PreToolUse guard] 매 수정 통과 (허브 파일 schema.prisma 는 이제 아무도 안 만지는 중)
+[훅 PostToolUse post-edit] pulse: wip push, fetch, 조용
+
+amazon: "수량 변경 UI 까지 하고 PR"
+Claude 가 components/ui/button.tsx 에 loading prop 을 추가한다 (수량 버튼용)
+[훅 PostToolUse post-edit]
+  - 겹침: components/ui/button.tsx 를 @solp(작업 트리 3분 전)도 지금 만지는 중입니다. 작게 커밋하고 자주 pulse 하세요.
+       ↑ solp 가 오늘 새 브랜치에서 같은 파일에 size prop 을 넣는 중. 허브 파일은 아니라 막지 않고 알린다
+Claude → amazon: "solp 도 지금 button.tsx 를 만지는 중입니다. 저는 loading prop 한 줄이라 그냥 진행하고, 먼저 머지되는 쪽에 맞춰 rebase 하겠습니다."
+
+Claude → handoff → 저널(events: changed lib/api/cart.ts addToCart 가 stock 검증 → 재고 부족 시 throw …), check, push, PR → 머지
+```
+
+### 이틀 동안 사람이 한 것
+
+- solp 와 amazon 은 서로에게 **한 번도** 카톡을 안 보냈다. 재고 질문과 답도 저널 이벤트로 오갔다.
+- 스키마를 둘이 동시에 고치는 사고는 1일차에 훅이 막았고, 2일차에는 먼저 머지된 쪽 위에 나중 쪽이 rebase 해서 작은 충돌로 끝났다.
+- `getProduct` 시그니처 변경은 amazon 의 세션 시작 때 자동으로 떴다. amazon 의 Claude 는 cart.ts 를 고친 뒤에 새 코드를 짰다.
+- 사람이 한 건 `start-work` 와 `handoff` 를 시킨 것, 훅이 물어볼 때 "UI 먼저" "그냥 진행" 같은 판단을 내린 것뿐이다.
 
 ### 장치 여섯 개
 
