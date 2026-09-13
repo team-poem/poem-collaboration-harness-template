@@ -41,6 +41,9 @@ check "sobaya 명령(쓰기 패턴 없음)은 통과"                "[ \"\$rc\"
 git -C "$A" switch -q feat/x
 rc="$(printf '{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"echo x > apps/shop/src/b.ts"},"cwd":"%s"}' "$WS" | disp 2>/dev/null; echo $?)"
 check "claim 있는 브랜치면 루트에서의 Bash 쓰기 통과"     "[ \"\$rc\" = 0 ]"
+rm -f "$A/.claude/cache/edits"
+rc="$(printf '{"hook_event_name":"PostToolUse","tool_name":"Bash","tool_input":{"command":"tdd-set/bin/loop.sh apps/shop 20"},"cwd":"%s"}' "$WS" | disp >/dev/null 2>&1; echo $?)"
+check "loop.sh apps/shop (슬래시 없음) 도 앱으로 라우팅 → post-edit 카운트" "[ \"\$rc\" = 0 ] && [ -f '$A/.claude/cache/edits' ]"
 cd "$A" && echo n > src/n.ts
 out="$(printf '{"hook_event_name":"Stop","stop_hook_active":false,"cwd":"%s"}' "$WS" | disp)"
 check "Stop: 앱에 저널 없으면 block 전달"                 "printf '%s' \"\$out\" | grep -q '\"decision\":\"block\"'"
@@ -56,13 +59,19 @@ check "digest: sobaya 가 lock 과 다르면 sync 권유"         "sh scripts/co
 
 echo "# merge 모드"
 . "$A/harness/hooks/lib.sh"
-check "승인 상태 없음 → rebase"                           "[ \"\$(sync_mode)\" = rebase ]"
+check "기본값은 merge"                                    "[ \"\$(sync_mode)\" = merge ]"
+check "SYNC_MODE=auto + 승인 상태 없음 → rebase"            "[ \"\$(SYNC_MODE=auto sync_mode)\" = rebase ]"
 mkdir -p "$(git rev-parse --absolute-git-dir)/sobaya" && echo '{"baseline":"x"}' > "$(git rev-parse --absolute-git-dir)/sobaya/state.json"
-check "승인 상태 있음 → merge"                            "[ \"\$(sync_mode)\" = merge ]"
+check "SYNC_MODE=auto + 승인 상태 있음 → merge"            "[ \"\$(SYNC_MODE=auto sync_mode)\" = merge ]"
 git add -A && git commit -qm w >/dev/null 2>&1; base="$(git rev-parse HEAD)"
 git switch -q main && echo m > src/m.ts && git add -A && git commit -qm main-change && git push -q origin main && git switch -q feat/x
 out="$(sh scripts/collab.sh pulse)"   # pulse 가 직접 fetch 해서 main 변경을 본다
 check "pulse: merge 로 따라잡고 조상 관계 유지"            "printf '%s' \"\$out\" | grep -q '자동으로 merge' && git merge-base --is-ancestor \"\$base\" HEAD"
+git switch -q main && echo m2 > src/m2.ts && git add -A && git commit -qm main-change-2 && git push -q origin main && git switch -q feat/x
+echo '{"baseline":"x","active":{"head":"y"}}' > "$(git rev-parse --absolute-git-dir)/sobaya/state.json"
+out="$(sh scripts/collab.sh pulse)"
+check "sobaya 항목 진행 중이면 따라잡기 보류"              "printf '%s' \"\$out\" | grep -q '보류' && ! git merge-base --is-ancestor origin/main HEAD"
+echo '{"baseline":"x","active":null}' > "$(git rev-parse --absolute-git-dir)/sobaya/state.json"
 
 echo "# plan 파일 규칙"
 echo s > spec.md && echo f > failed-test.md && printf '# j\n\n## 이벤트\n- done src/ x\n\n## 남은 것\n- 없음\n' > "collab/journal/$today-solp-feat--x.md" && git add -A && git commit -qm plan

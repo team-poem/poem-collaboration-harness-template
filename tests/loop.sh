@@ -40,7 +40,7 @@ check "두 번째 digest: 이벤트는 사라지고 ask 는 남음" "! printf '%
 
 echo "# 동시 작업: 같은 파일을 만지면"
 cd "$R/amazon" && echo 'size' >> components/ui/button.tsx && echo '{"dep":1}' > package.json     # 커밋 안 함
-check "amazon pulse: 작업 트리 스냅샷 push"   "col amazon pulse >/dev/null; git -C '$R/origin.git' show-ref refs/wip/amazon >/dev/null"
+check "amazon pulse: 작업 트리 스냅샷 push (브랜치별 ref)"   "col amazon pulse >/dev/null; git -C '$R/origin.git' show-ref refs/wip/amazon/feat--settings >/dev/null"
 cd "$R/solp" && echo 'loading' >> components/ui/button.tsx
 out="$(col solp pulse)"
 check "solp pulse: button.tsx 겹침 감지"      "printf '%s' \"\$out\" | grep -q '겹침: components/ui/button.tsx 를 @amazon'"
@@ -60,7 +60,7 @@ echo "# main 변경 → 자동 rebase"
 cd "$R/amazon" && git stash -q && git switch -q main && echo 'export const X = 1' > lib/api/consts.ts && git add -A && git commit -qm "main change" && git push -q origin main && git switch -q feat/settings && git stash pop -q
 cd "$R/solp" && git add -A && git commit -qm "solp work" >/dev/null
 out="$(col solp pulse)"
-check "깨끗한 트리: 자동 rebase"              "printf '%s' \"\$out\" | grep -q '자동으로 rebase' && git -C '$R/solp' merge-base --is-ancestor origin/main HEAD"
+check "깨끗한 트리: 자동 merge (기본)"        "printf '%s' \"\$out\" | grep -q '자동으로 merge' && git -C '$R/solp' merge-base --is-ancestor origin/main HEAD"
 cd "$R/amazon" && git add -A && git commit -qm "amazon work" -q && git push -q origin HEAD && git switch -q main && mkdir -p app/checkout && printf 'import { getUser } from \"../../lib/api/user\"\nconflict\n' > app/checkout/page.tsx && git add -A && git commit -qm "main conflict" && git push -q origin main && git switch -q feat/settings
 cd "$R/solp" && echo more >> app/checkout/page.tsx && git add -A && git commit -qm "solp more" -q
 out="$(col solp pulse)"
@@ -69,9 +69,20 @@ cd "$R/solp" && echo dirty > app/checkout/x.ts
 out="$(col solp pulse)"
 check "더러운 트리: rebase 안 하고 안내"       "printf '%s' \"\$out\" | grep -q '커밋한 뒤' || [ -z \"\$out\" ]"
 
+echo "# squash 머지 감지와 브랜치별 seen"
+cd "$R/amazon" && git switch -q main && git pull -q --ff-only origin main 2>/dev/null; git merge -q --squash feat/settings >/dev/null 2>&1 && git commit -qm "feat: settings (squash)" && git push -q origin main; git switch -q feat/settings
+check "squash 머지된 브랜치는 동료 목록에서 사라짐"  "! col solp digest --fetch | grep -q 'feat/settings · @amazon'"
+check "squash 머지된 저널 이벤트가 중복 주입되지 않음" "[ \"\$(col solp digest | grep -c 'toast.tsx')\" -le 1 ]"
+cd "$R/solp" && git switch -qc feat/other origin/main 2>/dev/null && mkdir -p collab/active/feat--other && printf -- '---\nbranch: feat/other\nowner: solp\nstarted: %s\nstatus: active\ngoal: other\n---\n' "$today" > collab/active/feat--other/claim.md && printf 'import { getUser } from "../../lib/api/user"\n' > app/checkout/other.tsx && git add -A && git commit -qm other >/dev/null
+cd "$R/amazon" && git switch -qc feat/again origin/main 2>/dev/null && mkdir -p collab/active/feat--again && printf -- '---\nbranch: feat/again\nowner: amazon\nstarted: %s\nstatus: active\ngoal: again\n---\n' "$today" > collab/active/feat--again/claim.md && echo again >> components/ui/button.tsx && printf '# again\n\n## 이벤트\n- changed lib/api/user.ts getUser 반환형 변경 → 호출부 확인\n\n## 남은 것\n- x\n' > "collab/journal/$today-amazon-feat--again.md" && git add -A && git commit -qm again && git push -q -u origin HEAD
+check "브랜치 X 에서 본 이벤트"                 "col solp digest --fetch | grep -q '반환형 변경'"
+cd "$R/solp" && git switch -q feat/checkout
+check "다른 브랜치 Y 의 세션에서도 다시 뜸 (브랜치별 seen)" "col solp digest | grep -q '반환형 변경'"
+cd "$R/solp" && git switch -q feat/other
+
 echo "# check 와 stop"
-cd "$R/solp" && rm app/checkout/x.ts
-check "check: 다른 열린 브랜치와 같은 파일 알림" "col solp check | grep -q 'button.tsx(@amazon)'"
+cd "$R/solp" && git switch -q feat/checkout && rm -f app/checkout/x.ts
+check "check: 다른 열린 브랜치와 같은 파일 알림" "col solp check | grep -q 'button.tsx(@amazon)' || col solp check | grep -q 'user.ts(@amazon)'"
 cd "$R/solp" && rm "collab/journal/$today-solp-feat--checkout.md" && git add -A && git commit -qm rmj -q && echo n > app/checkout/n.tsx
 out="$(printf '{"stop_hook_active":false}' | hook solp stop)"
 check "stop: 변경 있고 저널 없음 → block"     "printf '%s' \"\$out\" | grep -q '\"decision\":\"block\"'"

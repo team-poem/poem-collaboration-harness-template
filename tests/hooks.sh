@@ -54,10 +54,14 @@ got="$(printf '{"tool_name":"Write","tool_input":{"file_path":"%s/collab/journal
 check "심링크 경로도 정규화해 차단"        "[ '$got' = 2 ]"
 
 echo "# 허브 파일 + 동료 wip"
-printf 'minsu\t120\tpackage.json src/pay/p.ts\n' > .claude/cache/wip.tsv
-expect "허브 파일을 동료가 만지는 중 → 차단" guard package.json 2
+printf 'minsu\tfeat--pay\t120\tpackage.json src/pay/p.ts\t-\n' > .claude/cache/wip.tsv
+expect "허브 파일을 동료가 편집 중 → 차단"  guard package.json 2
 check  "메시지에 상대와 시각"               "grep -q 'minsu' '$W/err' && grep -q '120초' '$W/err'"
 expect "허브 아닌 파일은 통과"              guard src/pay/p.ts 0
+printf 'minsu\tfeat--pay\t120\t-\tpackage.json\n' > .claude/cache/wip.tsv
+expect "동료 브랜치에 커밋만 된 허브 파일은 통과(알림만)" guard package.json 0
+call post-edit package.json >/dev/null;     check "post-edit: 커밋된 겹침도 알림" "grep -q '겹침: package.json' '$W/out'"
+printf 'minsu\tfeat--pay\t120\tpackage.json src/pay/p.ts\t-\n' > .claude/cache/wip.tsv; rm -f .claude/cache/warned
 call post-edit src/pay/p.ts >/dev/null;     check "post-edit: 겹침 알림" "grep -q '겹침: src/pay/p.ts' '$W/out'"
 call post-edit src/pay/p.ts >/dev/null;     check "post-edit: 같은 파일 재알림 없음" "[ ! -s '$W/out' ]"
 expect "동료가 안 만지는 허브 파일은 통과"   guard prisma/schema.prisma 0
@@ -77,6 +81,7 @@ check "워크스페이스 루트에서 앱 파일 → 앱의 collab 규칙 적�
 echo "# 이벤트 파서"
 . "$H/lib.sh"
 check "changed + 경로"   "[ \"\$(printf -- '- changed lib/api/user.ts getUser 가 id 를 받음 → 호출부 수정' | sed 's/^[[:space:]]*-[[:space:]]*//' | awk '{t=\$1; p=\"-\"; s=2; if (\$2 ~ /[\\/.]/ && \$2 !~ /^@/) { p=\$2; s=3 }; txt=\"\"; for (i=s;i<=NF;i++) txt=txt (i>s?\" \":\"\") \$i; printf \"%s|%s|%s\", t, p, txt}')\" = 'changed|lib/api/user.ts|getUser 가 id 를 받음 → 호출부 수정' ]"
+check "dep zod@3.23 은 경로 아님"  "[ \"\$(printf -- '- dep zod@3.23 추가' | sed 's/^[[:space:]]*-[[:space:]]*//' | awk '{t=\$1; p=\"-\"; s=2; if (\$2 ~ /\\// && \$2 !~ /^@/) { p=\$2; s=3 }; txt=\"\"; for (i=s;i<=NF;i++) txt=txt (i>s?\" \":\"\") \$i; printf \"%s|%s|%s\", t, p, txt}')\" = 'dep|-|zod@3.23 추가' ]"
 check "ask @핸들 (경로 없음)" "[ \"\$(printf -- '- ask @me 웹훅이 토큰 읽나?' | sed 's/^[[:space:]]*-[[:space:]]*//' | awk '{t=\$1; p=\"-\"; s=2; if (\$2 ~ /[\\/.]/ && \$2 !~ /^@/) { p=\$2; s=3 }; txt=\"\"; for (i=s;i<=NF;i++) txt=txt (i>s?\" \":\"\") \$i; printf \"%s|%s|%s\", t, p, txt}')\" = 'ask|-|@me 웹훅이 토큰 읽나?' ]"
 check "md_section"       "[ \"\$(printf '## 이벤트\n- a\n\n- b\n## 남은 것\n- c\n' > '$W/m.md'; md_section '$W/m.md' 이벤트 | tr '\n' ' ')\" = '- a - b ' ]"
 check "wip_snapshot 이 미추적 파일 포함"  "echo new > src/auth/untracked.ts; sha=\$(wip_snapshot); git ls-tree -r --name-only \$sha | grep -q src/auth/untracked.ts && ! git log --oneline | grep -q wip"
@@ -84,6 +89,7 @@ check "wip_snapshot 이 미추적 파일 포함"  "echo new > src/auth/untracked
 echo "# 설정 일관성: Claude 와 Codex 가 같은 훅 스크립트를 가리키는가"
 c1="$(jq -r '.hooks|to_entries[]|.key+" "+(.value[]|.hooks[]|.command|sub("^\"\\$CLAUDE_PROJECT_DIR\"/";""))' "$SRC/.claude/settings.json" | sort)"
 c2="$(jq -r '.hooks|to_entries[]|.key+" "+(.value[]|.hooks[]|.command)' "$SRC/.codex/hooks.json" | sort)"
+check "git 훅 4개 존재·실행 가능"             "for h in pre-commit pre-push pre-merge-commit post-commit; do [ -x \"$SRC/.githooks/\$h\" ] || exit 1; done"
 check "settings.json ≡ .codex/hooks.json"   "[ \"\$c1\" = \"\$c2\" ] && [ -n \"\$c1\" ]"
 check "가리키는 스크립트가 모두 존재·실행 가능" "for s in \$(printf '%s\n' \"\$c2\" | awk '{print \$2}' | sort -u); do [ -x \"\$SRC/\$s\" ] || exit 1; done"
 check ".claude/skills → .agents/skills 심링크" "[ -L '$SRC/.claude/skills' ] && [ -f '$SRC/.claude/skills/start-work/SKILL.md' ]"
@@ -108,18 +114,26 @@ git reset -q HEAD collab/journal/2026-01-01-minsu-old.md && git checkout -q coll
 echo z >> collab/active/feat--pay/claim.md; git add collab/active/feat--pay/claim.md
 check "남의 claim 수정 커밋 차단"              "! git commit -qm x 2>/dev/null"
 git reset -q HEAD collab/active/feat--pay/claim.md && git checkout -q collab/active/feat--pay/claim.md
-printf 'minsu\t60\tpackage.json\n' > .claude/cache/wip.tsv; echo '{"a":1}' > package.json; git add package.json
-check "pre-commit 은 wip 허브 차단을 안 함 (커밋 시점엔 늦음)" "git commit -qm pkg 2>/dev/null"
+printf 'minsu\tfeat--pay\t60\tpackage.json\t-\n' > .claude/cache/wip.tsv; date +%s > .claude/cache/pulse.at; echo '{"a":1}' > package.json; git add package.json
+check "pre-commit 은 wip 허브를 차단 안 하고 경고만"    "git commit -qm pkg 2>'$W/err' && grep -q '주의: 허브 파일' '$W/err'"
 rm -f .claude/cache/wip.tsv
 printf '#!/bin/sh\necho SOBAYA_HOOK_RAN >> "$(git rev-parse --show-toplevel)/.sobaya-ran"\n' > .git/hooks/pre-commit; chmod +x .git/hooks/pre-commit
 echo y > src/auth/y.ts; git add src/auth/y.ts; git commit -qm y 2>/dev/null
 check "sobaya 앱 pre-commit 을 이어서 실행"     "[ -f .sobaya-ran ]"
-rm -f .git/hooks/pre-commit .sobaya-ran; git config --unset core.hooksPath; git switch -q feat/login
+rm -f .git/hooks/pre-commit .sobaya-ran
+echo "# git 훅: pre-push / pre-merge-commit / post-commit"
+check "pre-push: main 으로 직접 push 차단"      "! printf 'refs/heads/main %s refs/heads/main %s\n' \$(git rev-parse HEAD) 0000000000000000000000000000000000000000 | sh .githooks/pre-push 2>/dev/null"
+check "pre-push: 브랜치 push 통과"              "printf 'refs/heads/feat/hook %s refs/heads/feat/hook 0000000000000000000000000000000000000000\n' \$(git rev-parse HEAD) | sh .githooks/pre-push 2>/dev/null"
+check "pre-push: CI 예외"                       "printf 'refs/heads/main %s refs/heads/main 0\n' \$(git rev-parse HEAD) | COLLAB_ALLOW_PROTECTED_PUSH=1 sh .githooks/pre-push 2>/dev/null"
+git switch -q main
+check "pre-merge-commit: main 에서 코드 브랜치 로컬 머지 차단" "! git merge -q --no-ff --no-edit feat/hook 2>/dev/null; git merge --abort 2>/dev/null; ! git log --oneline -1 | grep -q 'Merge'"
+git config --unset core.hooksPath; git switch -q feat/login
 
 echo "# check"
 echo z > src/auth/b.ts; printf '# j\n\n## 이벤트\n- changed src/auth/a.ts x\n\n## 남은 것\n- y\n' > collab/journal/2026-01-02-me-feat--login.md
 git add -A && git commit -qm work
 check "check 통과"                         "sh scripts/collab.sh check --base main >'$W/chk' 2>&1"
+check "check: CI(detached HEAD)에서 자기 브랜치를 남으로 안 봄" "git switch -q --detach && GITHUB_HEAD_REF=feat/login sh scripts/collab.sh check --base main 2>&1 | grep -v -q '같은 파일을 바꿈' ; git switch -q feat/login"
 printf '# bad\n' > collab/journal/2026-01-02-me-feat--login-2.md; git add -A && git commit -qm bad
 check "check: 이벤트 절 없는 저널 실패"     "! sh scripts/collab.sh check --base main >'$W/chk' 2>&1 && grep -q '절 없음' '$W/chk'"
 git reset -q --hard HEAD~1; echo edit >> collab/journal/2026-01-01-minsu-old.md; git add -A && git commit -qm edit-old
