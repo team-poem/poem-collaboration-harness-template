@@ -13,14 +13,7 @@ chmod +x harness/hooks/*.sh harness/*.sh .githooks/* scripts/*.sh tests/*.sh 2>/
 git config core.hooksPath .githooks   # 어느 도구로 커밋하든 같은 규칙
 [ -e CLAUDE.md ] || ln -s AGENTS.md CLAUDE.md
 git config collab.me "$owner"; git config rerere.enabled true
-# GitHub 머지 정책: squash 만 + 머지 시 브랜치 삭제 (하네스의 머지 감지·prune 이 이 전제로 동작). 실패해도 진행
-if command -v gh >/dev/null 2>&1 && repo="$(gh repo view --json nameWithOwner --jq .nameWithOwner 2>/dev/null)" && [ -n "$repo" ]; then
-  gh api -X PATCH "repos/$repo" -F allow_squash_merge=true -F allow_merge_commit=false -F allow_rebase_merge=false -F delete_branch_on_merge=true \
-    -f squash_merge_commit_title=PR_TITLE -f squash_merge_commit_message=PR_BODY >/dev/null 2>&1 && echo "✓ GitHub: squash 머지만, 머지 시 브랜치 삭제" || echo "! GitHub 머지 정책 설정 실패 — 리포 Settings 에서 squash only + delete branch on merge 를 켜세요"
-  # main 보호: PR 필수, 훅·루프 검증 통과 필수, force push·삭제 금지. private + Free 플랜이면 실패한다 (git 훅이 대신한다)
-  prot='{"required_status_checks":{"strict":true,"contexts":["훅·루프 검증"]},"enforce_admins":false,"required_pull_request_reviews":{"required_approving_review_count":0,"bypass_pull_request_allowances":{"apps":["github-actions"]}},"restrictions":null,"allow_force_pushes":false,"allow_deletions":false}'
-  printf '%s' "$prot" | gh api -X PUT "repos/$repo/branches/main/protection" --input - >/dev/null 2>&1 && echo "✓ GitHub: main 보호 (PR 필수, CI 통과 필수)" || echo "! main 보호 설정 실패 (private + Free 플랜이면 불가) — git 훅이 대신 막는다"
-fi
+# GitHub 리포 설정(squash 만, 브랜치 삭제, main 보호)은 첫 push 뒤에 harness/github-policy.sh 가 한다 (보호를 먼저 걸면 초기화 커밋을 못 올린다)
 cat <<MSG
 초기화 완료: $name · 나: @$owner
 팀원 각자 클론 후:  git config collab.me <핸들> && git config rerere.enabled true
@@ -28,5 +21,6 @@ cat <<MSG
   1. harness/config.sh 의 HOTSPOTS 를 이 프로젝트의 허브 파일로 맞춘다 (스키마, lockfile, 배럴, i18n …)
      AGENTS.md 의 '- Test:' 에 실제 테스트 명령을 적는다 (sobaya 를 쓰면 attach-sobaya.sh 가 물어본다)
   2. git add -A && git commit -m "chore: init collaboration harness" && git push
+     그 다음 sh harness/github-policy.sh   ← GitHub 에 squash 머지만·브랜치 자동 삭제·main 보호(PR·CI 필수)
   3. claude 를 켜면 협업 현황이 먼저 뜬다. 첫 작업은 start-work 스킬
 MSG

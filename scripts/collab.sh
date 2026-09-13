@@ -221,9 +221,9 @@ check)
   if [ -f "$cp" ]; then for k in branch owner goal status; do [ -n "$(claim_get "$cp" "$k")" ] || V "$cp: '$k:' 비어 있음"; done
     [ "$(branch_slug "$(claim_get "$cp" branch)")" = "$(basename "$(dirname "$cp")")" ] || V "$cp: branch 가 디렉토리명과 다름"
     case "$(claim_get "$cp" status)" in active|paused|done) ;; *) V "$cp: status 는 active|paused|done" ;; esac
-  else V "claim 없음: $cp (Skill: start-work)"; fi
+  else V "claim 없음: $cp (start-work 스킬)"; fi
   journals="$(printf '%s\n' "$changed" | awk '$1=="A"{print $2}' | grep "^$JOURNAL_DIR/[^/]*\.md$" | grep -v README || true)"
-  [ -n "$journals" ] || V "저널 없음. $JOURNAL_DIR/ 에 새 파일 (Skill: handoff)"
+  [ -n "$journals" ] || V "저널 없음. $JOURNAL_DIR/ 에 새 파일 (handoff 스킬)"
   for j in $journals; do for h in "이벤트" "남은 것"; do grep -q "^## $h" "$j" || V "$j: '## $h' 절 없음"; done
     basename "$j" | grep -Eq '^[0-9]{4}-[0-9]{2}-[0-9]{2}-[^-]+-' || V "$j: 파일명은 YYYY-MM-DD-<owner>-<slug>.md"; done
   printf '%s\n' "$changed" | awk '$1~/^[MD]/{print $2}' | grep -q "^$JOURNAL_DIR/.*\.md$" && V "기존 저널을 수정/삭제함 (append-only)"
@@ -264,8 +264,13 @@ prepush)
   # stdin: "<local ref> <local sha> <remote ref> <remote sha>" 줄들. 보호 브랜치로의 push 는 차단 (CI 는 COLLAB_ALLOW_PROTECTED_PUSH=1)
   if [ -z "${COLLAB_ALLOW_PROTECTED_PUSH:-}" ] && [ ! -t 0 ]; then
     while read -r lref lsha rref rsha; do [ -n "$rref" ] || continue; rb="${rref#refs/heads/}"
-      if is_protected_branch "$rb" && [ "$lsha" != "0000000000000000000000000000000000000000" ]; then
-        echo "차단: 보호 브랜치 $rb 로 직접 push 하지 않습니다. PR 로 머지하세요. (CI 나 관리자는 COLLAB_ALLOW_PROTECTED_PUSH=1)" >&2; exit 1; fi; done
+      is_protected_branch "$rb" || continue; [ "$lsha" != "0000000000000000000000000000000000000000" ] || continue   # 삭제는 여기서 안 봄
+      [ "$rsha" = "0000000000000000000000000000000000000000" ] && continue                                              # 원격에 없던 브랜치의 첫 publish
+      # 하네스·협업 메타만 바뀐 push(초기화 커밋, claim 정리 등)는 통과 — guard 의 보호 브랜치 허용 목록과 같은 기준
+      if g rev-parse -q --verify "$rsha^{commit}" >/dev/null 2>&1; then
+        meta_only=1; for f in $(g diff --name-only "$rsha" "$lsha" 2>/dev/null); do path_matches_any "$f" $PROTECTED_BRANCH_ALLOW || { meta_only=0; break; }; done
+        [ $meta_only = 1 ] && continue; fi
+      echo "차단: 보호 브랜치 $rb 로 코드를 직접 push 하지 않습니다. 브랜치를 만들어 PR 로 머지하세요. (CI 나 관리자는 COLLAB_ALLOW_PROTECTED_PUSH=1)" >&2; exit 1; done
   fi
   is_protected_branch "$BR" && exit 0; [ -f "$(claim_path_for "$BR")" ] || exit 0
   [ -n "$(my_files | head -n1)" ] || exit 0
