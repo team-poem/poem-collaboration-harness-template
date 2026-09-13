@@ -146,8 +146,12 @@ echo y > src/auth/y.ts; git add src/auth/y.ts; git commit -qm y 2>/dev/null
 check "sobaya 앱 pre-commit 을 이어서 실행"     "[ -f .sobaya-ran ]"
 rm -f .git/hooks/pre-commit .sobaya-ran
 echo "# git 훅: pre-push / pre-merge-commit / post-commit"
-check "pre-push: main 으로 직접 push 차단"      "! printf 'refs/heads/main %s refs/heads/main %s\n' \$(git rev-parse HEAD) 0000000000000000000000000000000000000000 | sh .githooks/pre-push 2>/dev/null"
+check "pre-push: main 으로 코드 직접 push 차단"  "! printf 'refs/heads/main %s refs/heads/main %s\n' \$(git rev-parse HEAD) \$(git rev-parse main) | sh .githooks/pre-push 2>/dev/null"
 check "pre-push: 브랜치 push 통과"              "printf 'refs/heads/feat/hook %s refs/heads/feat/hook 0000000000000000000000000000000000000000\n' \$(git rev-parse HEAD) | sh .githooks/pre-push 2>/dev/null"
+git switch -q main; git commit -q --allow-empty -m base; base="$(git rev-parse HEAD)"; echo x >> collab/journal/README.md; git add collab/journal/README.md; git commit -qm meta 2>/dev/null
+check "pre-push: 하네스 메타만 바뀐 main push 통과(초기화 커밋)"  "printf 'refs/heads/main %s refs/heads/main %s\n' \$(git rev-parse HEAD) \$base | sh .githooks/pre-push 2>/dev/null"
+check "pre-push: 원격에 없던 브랜치의 첫 publish 통과"        "printf 'refs/heads/main %s refs/heads/main 0000000000000000000000000000000000000000\n' \$(git rev-parse HEAD) | sh .githooks/pre-push 2>/dev/null"
+git reset -q --hard "$base"; git switch -q feat/hook
 check "pre-push: CI 예외"                       "printf 'refs/heads/main %s refs/heads/main 0\n' \$(git rev-parse HEAD) | COLLAB_ALLOW_PROTECTED_PUSH=1 sh .githooks/pre-push 2>/dev/null"
 git switch -q main
 check "pre-merge-commit: main 에서 코드 브랜치 로컬 머지 차단" "! git merge -q --no-ff --no-edit feat/hook 2>/dev/null; git merge --abort 2>/dev/null; ! git log --oneline -1 | grep -q 'Merge'"
@@ -157,6 +161,7 @@ echo "# check"
 echo z > src/auth/b.ts; printf '# j\n\n## 이벤트\n- changed src/auth/a.ts x\n\n## 남은 것\n- y\n' > collab/journal/2026-01-02-me-feat--login.md
 git add -A && git commit -qm work
 check "check 통과"                         "sh scripts/collab.sh check --base main >'$W/chk' 2>&1"
+[ $fail -gt 0 ] && sed 's/^/     /' "$W/chk" | head -12
 check "check: CI(detached HEAD)에서 자기 브랜치를 남으로 안 봄" "git switch -q --detach && GITHUB_HEAD_REF=feat/login sh scripts/collab.sh check --base main 2>&1 | grep -v -q '같은 파일을 바꿈' ; git switch -q feat/login"
 printf '# bad\n' > collab/journal/2026-01-02-me-feat--login-2.md; git add -A && git commit -qm bad
 check "check: 이벤트 절 없는 저널 실패"     "! sh scripts/collab.sh check --base main >'$W/chk' 2>&1 && grep -q '절 없음' '$W/chk'"
