@@ -19,10 +19,10 @@
 
 ## PR 과 머지
 - 본문은 `scripts/collab.sh pr-body` 가 만든다. 사람은 "검증" 칸만 채운다. 제목 = claim goal.
-- **머지는 squash 만, 머지 시 브랜치 삭제.** `init.sh` 가 GitHub 설정을 시도한다. 하네스의 머지 감지와 prune 이 이 전제로 돈다.
+- **머지는 squash 만, 머지 시 브랜치 삭제.** 첫 push 뒤 `sh harness/github-policy.sh` 가 GitHub 설정을 건다 (온보딩이 한다). 하네스의 머지 감지와 prune 이 이 전제로 돈다.
 - 리뷰어는 서로. 하루에 PR 여러 개, 400줄 넘기 전에. 공유 파일(스키마·의존성) 변경은 작은 선행 PR 로 먼저.
 - 먼저 머지되는 쪽이 이기고 나중 쪽이 main 을 merge 로 따라잡는다 (pulse 가 자동). `check` 가 "다른 열린 브랜치와 같은 파일" 을 알려준다.
-- **main 보호:** 리포는 public 으로 둔다 (조직이 Free 플랜이라 private 에는 브랜치 보호를 못 건다). `init.sh` 가 PR 필수·CI 통과 필수·force push 금지를 건다. git 훅도 같은 걸 막으므로 이중이다. private 로 만들어야 하면 git 훅만 남는다는 걸 알고 쓴다.
+- **main 보호:** 리포는 public 으로 둔다 (조직이 Free 플랜이라 private 에는 브랜치 보호를 못 건다). `github-policy.sh` 가 PR 필수·CI 통과 필수·force push 금지를 건다. git 훅도 같은 걸 막으므로 이중이다. private 로 만들어야 하면 git 훅만 남는다는 걸 알고 쓴다.
 
 ## AI 사용 고지
 - 에이전트가 diff 의 의미 있는 부분을 썼으면 커밋에 `Assisted-by: <모델명>`.

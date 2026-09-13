@@ -38,9 +38,10 @@ description: 첫 세션 온보딩. 세션 시작 훅이 "setup" 또는 "join" �
 ## 경로 1 — 이 폴더를 프로젝트로 초기화
 1. 질문 1~4.
 2. `sh harness/init.sh <이름> <핸들>` → 출력 확인. HOTSPOTS 는 `harness/config.sh` 에 직접 쓴다. 테스트 명령은 AGENTS.md `- Test:` 에.
-3. `git add -A && git commit -m "chore: init collaboration harness" && git push` (원격이 없으면 3번 경로의 리포 생성 단계로).
-4. sobaya 워크스페이스가 감지됐고 사용자가 원하면 `sh harness/attach-sobaya.sh attach --test "<테스트 명령>"` 후 커밋.
-5. 검증(아래).
+3. `git add -A && git commit -m "chore: init collaboration harness" && git push` (원격이 없으면 3번 경로의 리포 생성 단계로). 초기화 커밋은 하네스 파일만 바꾸므로 pre-push 가 통과시킨다.
+4. `sh harness/github-policy.sh` — squash 머지만, 브랜치 자동 삭제, main 보호. private + Free 플랜이면 보호는 실패하고 git 훅이 대신한다고 사용자에게 말한다.
+5. sobaya 워크스페이스가 감지됐고 사용자가 원하면 `sh harness/attach-sobaya.sh attach --test "<테스트 명령>"` 후 커밋.
+6. 검증(아래).
 
 ## 경로 2 — 기존 GitHub 프로젝트에 붙이기
 1. 리포 URL 또는 로컬 경로를 묻는다. 로컬에 없으면 clone (sobaya 워크스페이스가 있으면 `<sobaya>/apps/<이름>` 에).
@@ -62,6 +63,9 @@ description: 첫 세션 온보딩. 세션 시작 훅이 "setup" 또는 "join" �
 2. `sh scripts/collab.sh digest --fetch` 를 보여주고 "앞으로 세션을 켜면 이게 먼저 뜹니다" 라고 말한다.
 3. 외울 규칙 셋: **시작에 claim, 끝에 저널, 남한테 할 말은 `ask @핸들`.** 나머지는 훅이 한다.
 4. "첫 작업을 시작할까요? start-work 로 브랜치와 claim 을 만듭니다." 로 마친다.
+
+## 셸 명령 승인이 안 나는 환경이면
+파일 편집으로 할 수 있는 것(AGENTS.md 의 이름·`- Test:`, `harness/config.sh` 의 HOTSPOTS)은 직접 하고, git 설정·커밋·push·`collab.sh` 는 사용자가 붙여넣을 수 있게 명령을 순서대로 보여준다.
 
 ## 하지 않는 것
 - 온보딩이 끝나기 전에 코드를 고치지 않는다.

@@ -39,7 +39,7 @@ harness/
   config.sh               PROTECTED_BRANCHES · HOTSPOTS · PULSE_* · AUTO_REBASE · SYNC_MODE · SOBAYA_ROOT
   attach-sobaya.sh        sobaya 결합 attach|sync|update|check · sobaya.lock (팀의 sobaya 커밋)
   sobaya/                 루트 세션용 훅 어댑터, sobaya 에 보내는 제안
-  init.sh · join.sh · install-into.sh · VERSION · CHANGELOG.md
+  init.sh · join.sh · install-into.sh · github-policy.sh · VERSION · CHANGELOG.md
 scripts/collab.sh         유일한 CLI. 훅·git 훅·CI·다른 하네스가 전부 이것만 부른다
 .agents/skills/           onboard · start-work · handoff (.claude/skills 는 심링크)
 .claude/settings.json     Claude Code 훅 배선 → harness/hooks
@@ -73,7 +73,7 @@ docs/guide.md             사람용 안내
 | 커밋된 저널 수정 · 남의 claim 수정 | 차단 | 차단 | 실패 |
 | 동료가 지금 **편집 중**(커밋 전)인 허브 파일(HOTSPOTS) | 차단 (`--allow` 로 해제) | 경고 | — |
 | 동료 브랜치에 커밋됐지만 미머지인 파일 · 그 외 겹침 | 알림 (선행 PR 제안) | — | 정보 |
-| 보호 브랜치로 직접 push · 로컬 머지 | — | 차단 (pre-push, pre-merge-commit) | — |
+| 보호 브랜치로 코드 직접 push · 로컬 머지 | — | 차단 (pre-push, pre-merge-commit). 하네스 메타만 바뀐 push 와 첫 publish 는 통과 | — |
 | 코드 변경 있는데 저널 없이 종료 | Stop 훅이 1회 세움 | pre-push 경고 | 저널 없으면 실패 |
 | 루트 `spec.md`·`failed-test.md` 가 PR 에 포함 | — | — | 실패 |
 
