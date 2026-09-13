@@ -1,0 +1,19 @@
+{
+  "hooks": {
+    "SessionStart": [
+      { "matcher": "startup|resume",
+        "hooks": [ { "type": "command", "command": "harness/hooks/session-start.sh" } ] }
+    ],
+    "PreToolUse": [
+      { "matcher": "Write|Edit|MultiEdit|NotebookEdit|Bash",
+        "hooks": [ { "type": "command", "command": "harness/hooks/guard.sh" } ] }
+    ],
+    "PostToolUse": [
+      { "matcher": "Write|Edit|MultiEdit|NotebookEdit|Bash",
+        "hooks": [ { "type": "command", "command": "harness/hooks/post-edit.sh" } ] }
+    ],
+    "Stop": [
+      { "hooks": [ { "type": "command", "command": "harness/hooks/stop.sh" } ] }
+    ]
+  }
+}

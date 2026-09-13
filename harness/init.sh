@@ -9,7 +9,8 @@ owner="$(printf '%s' "$owner" | tr ' -' '__')"; date="$(date +%Y-%m-%d)"
 grep -rl --exclude-dir=.git --exclude-dir=node_modules -e '{{PROJECT_NAME}}' -e '{{OWNER}}' -e '{{DATE}}' . 2>/dev/null \
   | grep -v '^./collab/templates/' | grep -v '^./harness/init.sh$' | while read -r f; do
   sed -i.bak -e "s/{{PROJECT_NAME}}/$name/g" -e "s/{{OWNER}}/$owner/g" -e "s/{{DATE}}/$date/g" "$f" && rm -f "$f.bak"; done
-chmod +x .claude/hooks/*.sh scripts/*.sh tests/*.sh 2>/dev/null || true
+chmod +x harness/hooks/*.sh harness/*.sh .githooks/* scripts/*.sh tests/*.sh 2>/dev/null || true
+git config core.hooksPath .githooks   # 어느 도구로 커밋하든 같은 규칙
 [ -e CLAUDE.md ] || ln -s AGENTS.md CLAUDE.md
 git config collab.me "$owner"; git config rerere.enabled true
 cat <<MSG

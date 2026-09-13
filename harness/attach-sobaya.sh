@@ -9,7 +9,7 @@
 # 배치: sobaya 워크스페이스 안에 이 리포를 둔다 (sobaya/apps/<이 리포>). 다른 곳이면 --sobaya 또는 harness/config.sh SOBAYA_ROOT.
 set -u
 ROOT="$(cd "$(dirname "$0")/.." && pwd -P)"; cd "$ROOT"
-. "$ROOT/.claude/hooks/lib.sh"
+. "$ROOT/harness/hooks/lib.sh"
 LOCK="$ROOT/harness/sobaya.lock"
 die() { echo "✗ $*" >&2; exit 1; }
 cmd="${1:-}"; [ $# -gt 0 ] && shift
@@ -20,10 +20,14 @@ if [ -n "$sob" ]; then sob="$(cd "$sob" && pwd -P)" || die "sobaya 경로 없음
 sob_head() { git -C "$sob" rev-parse HEAD 2>/dev/null; }
 sob_short() { git -C "$sob" rev-parse --short HEAD 2>/dev/null; }
 write_lock() { printf 'repo=%s\nsha=%s\nchecked=%s\n' "$(git -C "$sob" remote get-url origin 2>/dev/null || echo team-poem/sobaya)" "$(sob_head)" "$(today)" > "$LOCK"; }
-install_app() {  # 멱등. 앱 계약 파일과 앱 pre-commit
-  out="$(bash "$sob/tdd-set/bin/install.sh" "$ROOT" 2>&1)" || { echo "$out" >&2; die "sobaya install 실패"; }
-  echo "✓ sobaya 앱 계약: spec.md, failed-test.md, pre-commit 훅"
+install_app() {  # 멱등. 앱 계약 파일과 앱 pre-commit. sobaya 의 install.sh 는 core.hooksPath 가 있으면 거부하므로 잠깐 풀었다가 되돌린다.
+  hp="$(git config --get core.hooksPath 2>/dev/null || true)"; [ -z "$hp" ] || git config --unset core.hooksPath
+  out="$(bash "$sob/tdd-set/bin/install.sh" "$ROOT" 2>&1)"; rc=$?
+  [ -z "$hp" ] || git config core.hooksPath "$hp"
+  [ $rc -eq 0 ] || { echo "$out" >&2; die "sobaya install 실패"; }
+  echo "✓ sobaya 앱 계약: spec.md, failed-test.md, 앱 pre-commit(.git/hooks — 우리 .githooks/pre-commit 이 이어서 실행)"
 }
+sobaya_hook_ok() { h="$(git rev-parse --git-common-dir)/hooks/pre-commit"; [ -x "$h" ] && head -n2 "$h" | grep -q 'Sobaya app pre-commit'; }
 install_adapter() {  # 루트에서 세션을 열어도 collab 훅이 앱에 적용되게
   mkdir -p "$sob/.claude/hooks"; cp "$ROOT/harness/sobaya/collab-dispatch.sh" "$sob/.claude/hooks/collab-dispatch.sh"; chmod +x "$sob/.claude/hooks/collab-dispatch.sh"
   sl="$sob/.claude/settings.local.json"; d='"$CLAUDE_PROJECT_DIR"/.claude/hooks/collab-dispatch.sh'
@@ -34,7 +38,7 @@ install_adapter() {  # 루트에서 세션을 열어도 collab 훅이 앱에 적
   else printf '%s\n' "$want" > "$sl"; fi
   ex="$sob/.git/info/exclude"; mkdir -p "$(dirname "$ex")"; for l in ".claude/" "CLAUDE.md"; do grep -qxF "$l" "$ex" 2>/dev/null || echo "$l" >> "$ex"; done
   [ -e "$sob/CLAUDE.md" ] || ln -s AGENTS.md "$sob/CLAUDE.md"   # Claude Code 가 sobaya 계약을 읽게 (git 에는 안 올라감)
-  echo "✓ 루트 세션 어댑터: $sob/.claude/settings.local.json (git 추적 안 함)"
+  echo "✓ 루트 세션 어댑터(Claude): $sob/.claude/settings.local.json (git 추적 안 함). Codex 는 앱 안에서 세션을 여세요 — .codex/hooks.json 이 앱에 있습니다"
 }
 set_test() {
   cur="$(sed -n 's/^- Test:[[:space:]]*//p' AGENTS.md | head -n1)"
@@ -57,7 +61,7 @@ case "$cmd" in
     if [ -n "$(git -C "$sob" status --porcelain 2>/dev/null | grep -v '^?? \.claude/\|^?? CLAUDE.md')" ]; then echo "! sobaya 클론에 커밋 안 한 변경이 있어 pull 을 건너뜁니다 ($sob)"
     else git -C "$sob" pull -q --ff-only 2>/dev/null && echo "✓ sobaya $before → $(sob_short)" || echo "! pull --ff-only 실패 (브랜치가 갈라졌거나 오프라인). 그대로 진행"; fi
     install_app; install_adapter
-    bash "$sob/scripts/setup.sh" "$sob" --check --app "$ROOT" >/dev/null 2>&1 && echo "✓ sobaya 훅 검사 통과" || echo "! bash $sob/scripts/setup.sh $sob --check --app $ROOT 로 확인 필요"
+    sobaya_hook_ok && echo "✓ sobaya 앱 pre-commit 있음 (우리 pre-commit 뒤에 실행)" || echo "! sobaya 앱 pre-commit 이 없습니다. attach 를 다시 실행하세요"
     if [ "$cmd" = update ]; then write_lock; echo "✓ lock 갱신 → $(sob_short). 커밋해서 팀에 공유: git add harness/sobaya.lock && git commit -m 'chore: sobaya $(sob_short)'"
     else lk="$(sobaya_lock)"; [ -n "$lk" ] && [ "$lk" != "$(sob_head)" ] && echo "! 내 sobaya($(sob_short))가 lock($(printf '%s' "$lk" | cut -c1-7))과 다릅니다. 팀 기준을 올리려면 'update'"; fi ;;
   check)
@@ -66,7 +70,8 @@ case "$cmd" in
     echo "lock (팀 기준): ${lk:-없음}"; echo "upstream HEAD: ${up:-확인 불가}"
     [ -n "$lk" ] && [ "$lk" != "$(sob_head)" ] && echo "→ 클론이 lock 과 다름: sh harness/attach-sobaya.sh sync"
     [ -n "$up" ] && [ -n "$lk" ] && [ "$up" != "$lk" ] && echo "→ upstream 이 lock 보다 앞섬: sh harness/attach-sobaya.sh update 후 커밋"
-    bash "$sob/scripts/setup.sh" "$sob" --check --app "$ROOT" 2>&1 | sed 's/^/  /'
+    sobaya_hook_ok && echo "sobaya 앱 pre-commit: 있음" || echo "sobaya 앱 pre-commit: 없음"
+    [ "$(git config --get core.hooksPath 2>/dev/null)" = ".githooks" ] && echo "협업 git 훅: 활성 (.githooks)" || echo "협업 git 훅: 비활성 → git config core.hooksPath .githooks"
     [ -f "$sob/.claude/hooks/collab-dispatch.sh" ] && echo "루트 세션 어댑터: 설치됨" || echo "루트 세션 어댑터: 없음 (attach 또는 sync)" ;;
   *) sed -n '2,10p' "$0"; exit 1 ;;
 esac

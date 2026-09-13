@@ -135,11 +135,11 @@ sync_mode() { case "$SYNC_MODE" in rebase|merge) printf '%s' "$SYNC_MODE" ;; *) 
 REASON=""
 check_write() {
   p="$1"; REASON=""; branch="$(current_branch)" || return 0
-  [ "$branch" = "HEAD" ] && { REASON="detached HEAD 입니다. 브랜치를 만들고 Skill(start-work) 로 선언한 뒤 작업하세요."; return 2; }
+  [ "$branch" = "HEAD" ] && { REASON="detached HEAD 입니다. 브랜치를 만들고 start-work 스킬 로 선언한 뒤 작업하세요."; return 2; }
   if is_protected_branch "$branch"; then
     case "$p" in "$CLAIM_DIR"/*) [ "$(basename "$p")" = README.md ] || { REASON="차단: 보호 브랜치에서는 claim 을 편집하지 않습니다. 정리는 scripts/collab.sh prune."; return 2; } ;; esac
     path_matches_any "$p" $PROTECTED_BRANCH_ALLOW && return 0
-    REASON="차단: 보호 브랜치($branch)에서는 코드를 수정하지 않습니다. Skill(start-work) 로 작업 브랜치와 claim 을 만든 뒤 수정하세요."; return 2
+    REASON="차단: 보호 브랜치($branch)에서는 코드를 수정하지 않습니다. start-work 스킬 로 작업 브랜치와 claim 을 만든 뒤 수정하세요."; return 2
   fi
   case "$p" in
     "$JOURNAL_DIR"/*.md) [ "$(basename "$p")" = README.md ] && return 0
@@ -150,10 +150,10 @@ check_write() {
   esac
   path_matches_any "$p" $CLAIM_EXEMPT && return 0
   cp="$(claim_path_for "$branch")"
-  [ -f "$ROOT/$cp" ] || { REASON="차단: 이 브랜치($branch)에는 claim 이 없습니다 (수정 대상: $p). 먼저 $cp 를 만들어 무엇을 만드는지 선언하세요. Skill(start-work)."; return 2; }
+  [ -f "$ROOT/$cp" ] || { REASON="차단: 이 브랜치($branch)에는 claim 이 없습니다 (수정 대상: $p). 먼저 $cp 를 만들어 무엇을 만드는지 선언하세요. start-work 스킬."; return 2; }
   in_collab_meta "$p" && return 0
   # 허브 파일을 동료가 지금 만지는 중이면 차단 (세션 중 사용자가 허용한 경로는 통과)
-  if is_hotspot "$p"; then
+  if [ -z "${COLLAB_SKIP_WIP:-}" ] && is_hotspot "$p"; then
     [ -f "$CACHE/allow" ] && grep -qxF "$p" "$CACHE/allow" && return 0
     who="$(touching_now "$p" | awk -F"$TAB" '{printf "%s@%s(%s) ", (NR>1?", ":""), $1, $2}')"
     if [ -n "$who" ]; then
@@ -190,8 +190,8 @@ check_command() {
   done
   [ -n "$blocked" ] && { REASON="차단 (Bash 로 파일 쓰기):$blocked"; return 2; }
   if [ $found -eq 0 ]; then
-    is_protected_branch "$branch" && { REASON="차단: 보호 브랜치($branch)에서 파일을 쓰는 것으로 보이는 명령입니다. Skill(start-work) 로 브랜치를 만드세요."; return 2; }
-    [ -f "$ROOT/$(claim_path_for "$branch")" ] || { REASON="차단: claim 이 없는 브랜치($branch)에서 파일을 쓰는 것으로 보이는 명령입니다. Skill(start-work) 먼저."; return 2; }
+    is_protected_branch "$branch" && { REASON="차단: 보호 브랜치($branch)에서 파일을 쓰는 것으로 보이는 명령입니다. start-work 스킬 로 브랜치를 만드세요."; return 2; }
+    [ -f "$ROOT/$(claim_path_for "$branch")" ] || { REASON="차단: claim 이 없는 브랜치($branch)에서 파일을 쓰는 것으로 보이는 명령입니다. start-work 스킬 먼저."; return 2; }
   fi
   return 0
 }

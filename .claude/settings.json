@@ -2,18 +2,18 @@
   "hooks": {
     "SessionStart": [
       { "matcher": "startup|resume|clear",
-        "hooks": [ { "type": "command", "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/session-start.sh" } ] }
+        "hooks": [ { "type": "command", "command": "\"$CLAUDE_PROJECT_DIR\"/harness/hooks/session-start.sh" } ] }
     ],
     "PreToolUse": [
       { "matcher": "Write|Edit|MultiEdit|NotebookEdit|Bash",
-        "hooks": [ { "type": "command", "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/guard.sh" } ] }
+        "hooks": [ { "type": "command", "command": "\"$CLAUDE_PROJECT_DIR\"/harness/hooks/guard.sh" } ] }
     ],
     "PostToolUse": [
       { "matcher": "Write|Edit|MultiEdit|NotebookEdit|Bash",
-        "hooks": [ { "type": "command", "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/post-edit.sh" } ] }
+        "hooks": [ { "type": "command", "command": "\"$CLAUDE_PROJECT_DIR\"/harness/hooks/post-edit.sh" } ] }
     ],
     "Stop": [
-      { "hooks": [ { "type": "command", "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/stop.sh" } ] }
+      { "hooks": [ { "type": "command", "command": "\"$CLAUDE_PROJECT_DIR\"/harness/hooks/stop.sh" } ] }
     ]
   }
 }

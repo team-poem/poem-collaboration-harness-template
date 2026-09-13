@@ -1,7 +1,7 @@
 #!/bin/sh
 # sobaya 워크스페이스 루트에서 Claude 세션을 열 때 쓰는 어댑터.
 # 루트에는 collab 이 없으므로, 훅 입력을 보고 대상 앱(apps/<x>, collab/ 가 있는 것)을 찾아
-# 그 앱의 .claude/hooks/<같은 훅>.sh 를 CLAUDE_PROJECT_DIR=<앱> 으로 실행한다. 앱을 못 찾으면 통과.
+# 그 앱의 harness/hooks/<같은 훅>.sh 를 CLAUDE_PROJECT_DIR=<앱> 으로 실행한다. 앱을 못 찾으면 통과.
 # attach-sobaya.sh 가 <sobaya>/.claude/hooks/ 에 복사하고 settings.local.json 에 배선한다.
 WS="${CLAUDE_PROJECT_DIR:-$(pwd -P)}"
 INPUT="$(cat)"; command -v jq >/dev/null 2>&1 || exit 0
@@ -11,7 +11,7 @@ norm() { (cd "$1" 2>/dev/null && pwd -P); }
 app_of_dir() { d="$1"; while [ -n "$d" ] && [ "$d" != "/" ]; do [ -d "$d/collab" ] && [ -e "$d/.git" ] && { printf '%s' "$d"; return 0; }; d="$(dirname "$d")"; done; return 1; }
 apps() { for a in "$WS"/apps/*/; do [ -d "${a}collab" ] && [ -e "${a}.git" ] && printf '%s\n' "${a%/}"; done; }
 run_in() { # $1=app $2=hook 이름
-  h="$1/.claude/hooks/$2.sh"; [ -f "$h" ] || return 0
+  h="$1/harness/hooks/$2.sh"; [ -f "$h" ] || return 0
   printf '%s' "$INPUT" | CLAUDE_PROJECT_DIR="$1" sh "$h"
 }
 case "$event" in

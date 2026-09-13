@@ -6,10 +6,12 @@
 #   guard <path> | --allow <path>   쓰기 판정(exit 2 = 차단). --allow 는 이 세션에서 그 경로의 허브 차단을 해제
 #   check [--base REF]          PR 규칙 검사. 위반 시 exit 1. CI 와 handoff 가 사용
 #   prune                       main 전용. 머지·소멸 브랜치의 claim 삭제
+#   precommit                   git pre-commit 이 부른다. 스테이지된 파일마다 guard 와 같은 판정 (도구가 무엇이든)
+#   prepush                     git pre-push 가 부른다. 저널 없이 push 하면 경고 (막지는 않음)
 set -u
 HERE="$(cd "$(dirname "$0")" && pwd -P)"
 export CLAUDE_PROJECT_DIR="${CLAUDE_PROJECT_DIR:-$(cd "$HERE/.." && pwd -P)}"
-. "$CLAUDE_PROJECT_DIR/.claude/hooks/lib.sh"
+. "$CLAUDE_PROJECT_DIR/harness/hooks/lib.sh"
 cd "$ROOT" || exit 1
 ME="$(me)"; BR="$(current_branch)"; MAIN="$(main_ref || true)"
 
@@ -84,9 +86,9 @@ digest)
     echo; echo "## 나에게 온 질문·메시지 (답은 내 저널 이벤트에 'reply @상대' 로)"
     if [ -s "$A" ]; then while IFS="$TAB" read -r id b o j txt; do echo "- @$o ($b): $txt"; done < "$A"; else echo "- 없음"; fi
     echo; echo "## 내 claim"
-    if is_protected_branch "$BR"; then echo "- 보호 브랜치. 코드 수정은 차단됩니다. 작업 시작은 Skill(start-work)."
-    elif [ -f "$MINE" ]; then echo "- $(claim_get "$MINE" goal) · status $(claim_get "$MINE" status)"; o="$(claim_get "$MINE" owner)"; [ "$o" != "$ME" ] && echo "- 주의: 이 claim 의 owner 는 @$o. 이어받는 것이면 Skill(start-work) 의 '이어받기'."
-    else echo "- 없음. 파일 수정 전에 Skill(start-work) 로 선언하세요 (훅이 차단합니다)."; fi
+    if is_protected_branch "$BR"; then echo "- 보호 브랜치. 코드 수정은 차단됩니다. 작업 시작은 start-work 스킬."
+    elif [ -f "$MINE" ]; then echo "- $(claim_get "$MINE" goal) · status $(claim_get "$MINE" status)"; o="$(claim_get "$MINE" owner)"; [ "$o" != "$ME" ] && echo "- 주의: 이 claim 의 owner 는 @$o. 이어받는 것이면 start-work 스킬 의 '이어받기'."
+    else echo "- 없음. 파일 수정 전에 start-work 스킬 로 선언하세요 (훅이 차단합니다)."; fi
     echo; echo "## 동료가 바꾼 것 중 나에게 영향 있는 이벤트"
     if [ -s "$E" ]; then while IFS="$TAB" read -r id b o j t p txt; do echo "- [$t] ${p#-}${p:+ }$txt  (@$o, $b)"; mark_seen "$id"; done < "$E"
       echo "  → changed/migrated/removed 는 내 코드가 깨졌을 수 있다는 뜻. 작업 전에 해당 호출부를 확인한다. added 는 중복 구현 금지. rule 은 따른다."
@@ -190,5 +192,16 @@ prune)
     elif ref_merged "$r"; then echo "삭제: $d (브랜치 $b 머지됨)"; g rm -rq "$d"; fi; done
   echo "완료" ;;
 
-*) sed -n '2,9p' "$0"; exit 1 ;;
+precommit)
+  [ "$BR" = HEAD ] && exit 0
+  export COLLAB_SKIP_WIP=1; bad=0
+  g diff --cached --name-only --no-renames -z | tr '\0' '\n' | while IFS= read -r p; do [ -n "$p" ] || continue
+    check_write "$p" || { printf '✗ %s\n  %s\n' "$p" "$REASON" >&2; echo bad; }; done | grep -q bad && bad=1
+  [ $bad -eq 0 ] || { echo "커밋 차단 (협업 하네스). 위 안내대로 고친 뒤 다시 커밋하세요." >&2; exit 1; }; exit 0 ;;
+prepush)
+  is_protected_branch "$BR" && exit 0; [ -f "$(claim_path_for "$BR")" ] || exit 0
+  [ -n "$(my_files | head -n1)" ] || exit 0
+  [ -n "$MAIN" ] && g diff --name-only --diff-filter=A "$(g merge-base "$MAIN" HEAD)" HEAD -- "$JOURNAL_DIR" 2>/dev/null | grep -q "^$JOURNAL_DIR/[^/]*-$ME-" && exit 0
+  echo "주의: 이 브랜치에 코드 변경이 있는데 내 저널이 없습니다. PR 전에 handoff 스킬(또는 collab/journal/ 에 이벤트 파일)을 남기세요. CI 가 PR 에서 막습니다." >&2; exit 0 ;;
+*) sed -n '2,11p' "$0"; exit 1 ;;
 esac

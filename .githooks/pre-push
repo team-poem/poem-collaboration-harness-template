@@ -1,0 +1,5 @@
+#!/bin/sh
+# 협업 하네스 pre-push. 저널 없이 코드를 push 하면 경고만 한다 (막는 건 PR 의 CI).
+root="$(git rev-parse --show-toplevel)" || exit 0
+[ -f "$root/scripts/collab.sh" ] && sh "$root/scripts/collab.sh" prepush
+exit 0
