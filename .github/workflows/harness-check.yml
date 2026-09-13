@@ -11,6 +11,7 @@ jobs:
       - uses: actions/checkout@v4
       - run: sh tests/hooks.sh
       - run: sh tests/loop.sh
+      - run: sh tests/sobaya.sh
   collab:
     name: 협업 규칙 검사
     if: github.event_name == 'pull_request'
