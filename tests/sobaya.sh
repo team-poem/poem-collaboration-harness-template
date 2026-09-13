@@ -12,7 +12,7 @@ mkdir -p scripts; for f in tdd-set/bin/step.sh tdd-set/bin/install.sh scripts/se
 echo '# Sobaya' > AGENTS.md; git add -A && git commit -qm init
 # bare 원격 + 앱
 git init -q --bare "$R/origin.git" && git -C "$R/origin.git" symbolic-ref HEAD refs/heads/main
-A="$WS/apps/shop"; git clone -q "$R/origin.git" "$A" 2>/dev/null; cd "$A" && git switch -qc main 2>/dev/null && git config user.email a@a && git config user.name a && git config collab.me solp
+A="$WS/apps/shop"; git clone -q "$R/origin.git" "$A" 2>/dev/null; cd "$A" && git switch -qc main 2>/dev/null && git config user.email a@a && git config user.name a && git config collab.me solp && git config collab.onboarded true
 cp -R "$SRC/.claude" "$SRC/.codex" "$SRC/.githooks" "$SRC/harness" "$SRC/collab" "$SRC/scripts" "$SRC/.gitignore" "$SRC/AGENTS.md" . && rm -rf .claude/cache && ln -s AGENTS.md CLAUDE.md
 mkdir -p src && echo a > src/a.ts && echo '{}' > package.json && git add -A && git commit -qm init && git push -q origin main
 git switch -qc feat/x && mkdir -p collab/active/feat--x && printf -- '---\nbranch: feat/x\nowner: solp\nstarted: %s\nstatus: active\ngoal: x\n---\n' "$today" > collab/active/feat--x/claim.md && git add -A && git commit -qm claim && git push -q -u origin HEAD

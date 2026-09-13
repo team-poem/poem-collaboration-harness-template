@@ -86,6 +86,30 @@ check "ask @핸들 (경로 없음)" "[ \"\$(printf -- '- ask @me 웹훅이 토�
 check "md_section"       "[ \"\$(printf '## 이벤트\n- a\n\n- b\n## 남은 것\n- c\n' > '$W/m.md'; md_section '$W/m.md' 이벤트 | tr '\n' ' ')\" = '- a - b ' ]"
 check "wip_snapshot 이 미추적 파일 포함"  "echo new > src/auth/untracked.ts; sha=\$(wip_snapshot); git ls-tree -r --name-only \$sha | grep -q src/auth/untracked.ts && ! git log --oneline | grep -q wip"
 
+echo "# 온보딩: 리포 상태에 따라 세션 시작이 달라지는가"
+O="$(mktemp -d)"; cp -R "$SRC/.claude" "$SRC/.codex" "$SRC/.githooks" "$SRC/.agents" "$SRC/harness" "$SRC/collab" "$SRC/scripts" "$SRC/.gitignore" "$SRC/AGENTS.md" "$O"/; rm -rf "$O/.claude/cache"
+(cd "$O" && git init -q -b main && git config user.email o@o && git config user.name o && git add -A && git commit -qm init) >/dev/null 2>&1
+st="$(cd "$O" && CLAUDE_PROJECT_DIR="$O" sh scripts/collab.sh state)"
+check "플레이스홀더 남음 → state=setup"          "printf '%s' \"\$st\" | grep -q '^state=setup'"
+out="$(cd "$O" && CLAUDE_PROJECT_DIR="$O" sh harness/hooks/session-start.sh </dev/null)"
+check "setup: 세션 시작이 온보딩 메뉴를 주입"      "printf '%s' \"\$out\" | grep -q '온보딩' && printf '%s' \"\$out\" | grep -q '새 프로젝트 만들기' && ! printf '%s' \"\$out\" | grep -q '# 협업 현황'"
+(cd "$O" && sh harness/init.sh demo solp >/dev/null 2>&1 && git config --unset collab.me)
+st="$(cd "$O" && CLAUDE_PROJECT_DIR="$O" sh scripts/collab.sh state)"
+check "초기화됐지만 핸들 없음 → state=join"        "printf '%s' \"\$st\" | grep -q '^state=join'"
+out="$(cd "$O" && CLAUDE_PROJECT_DIR="$O" sh harness/hooks/session-start.sh </dev/null)"
+check "join: 메뉴 없이 합류 안내"                  "printf '%s' \"\$out\" | grep -q 'join' && ! printf '%s' \"\$out\" | grep -q '새 프로젝트 만들기'"
+(cd "$O" && sh harness/join.sh amazon >/dev/null)
+st="$(cd "$O" && CLAUDE_PROJECT_DIR="$O" sh scripts/collab.sh state)"
+check "join.sh 후 → state=ready (핸들·훅·rerere)"  "printf '%s' \"\$st\" | grep -q '^state=ready' && [ \"\$(git -C '$O' config collab.me)\" = amazon ] && [ \"\$(git -C '$O' config core.hooksPath)\" = .githooks ]"
+out="$(cd "$O" && CLAUDE_PROJECT_DIR="$O" sh harness/hooks/session-start.sh </dev/null)"
+check "ready: 세션 시작이 협업 현황을 주입"        "printf '%s' \"\$out\" | grep -q '# 협업 현황'"
+check "init.sh 가 scripts/·hooks 의 코드를 안 건드림"  "grep -q 'PROJECT_NAME' '$O/scripts/collab.sh' && ! grep -q 'demo' '$O/harness/hooks/lib.sh'"
+X="$(mktemp -d)"; (cd "$X" && git init -q -b main && git config user.email x@x && git config user.name x && echo '# 기존 프로젝트' > AGENTS.md && echo '{}' > package.json && git add -A && git commit -qm init) >/dev/null 2>&1
+(cd "$SRC" && sh harness/install-into.sh "$X" shop solp >"$W/inst" 2>&1)
+check "install-into: 하네스 복사 + init, 기존 AGENTS.md 보존"  "[ -f '$X/scripts/collab.sh' ] && [ -f '$X/harness/hooks/lib.sh' ] && [ -f '$X/AGENTS.collab.md' ] && grep -q '기존 프로젝트' '$X/AGENTS.md' && [ \"\$(git -C '$X' config collab.me)\" = solp ] && [ -L '$X/.claude/skills' ]"
+check "install-into: 두 번 돌려도 안전(멱등)"        "(cd '$SRC' && sh harness/install-into.sh '$X' shop solp >/dev/null 2>&1) && [ -f '$X/scripts/collab.sh' ]"
+rm -rf "$O" "$X"
+
 echo "# 설정 일관성: Claude 와 Codex 가 같은 훅 스크립트를 가리키는가"
 c1="$(jq -r '.hooks|to_entries[]|.key+" "+(.value[]|.hooks[]|.command|sub("^\"\\$CLAUDE_PROJECT_DIR\"/";""))' "$SRC/.claude/settings.json" | sort)"
 c2="$(jq -r '.hooks|to_entries[]|.key+" "+(.value[]|.hooks[]|.command)' "$SRC/.codex/hooks.json" | sort)"
