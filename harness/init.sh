@@ -17,6 +17,9 @@ git config collab.me "$owner"; git config rerere.enabled true
 if command -v gh >/dev/null 2>&1 && repo="$(gh repo view --json nameWithOwner --jq .nameWithOwner 2>/dev/null)" && [ -n "$repo" ]; then
   gh api -X PATCH "repos/$repo" -F allow_squash_merge=true -F allow_merge_commit=false -F allow_rebase_merge=false -F delete_branch_on_merge=true \
     -f squash_merge_commit_title=PR_TITLE -f squash_merge_commit_message=PR_BODY >/dev/null 2>&1 && echo "✓ GitHub: squash 머지만, 머지 시 브랜치 삭제" || echo "! GitHub 머지 정책 설정 실패 — 리포 Settings 에서 squash only + delete branch on merge 를 켜세요"
+  # main 보호: PR 필수, 훅·루프 검증 통과 필수, force push·삭제 금지. private + Free 플랜이면 실패한다 (git 훅이 대신한다)
+  prot='{"required_status_checks":{"strict":true,"contexts":["훅·루프 검증"]},"enforce_admins":false,"required_pull_request_reviews":{"required_approving_review_count":0,"bypass_pull_request_allowances":{"apps":["github-actions"]}},"restrictions":null,"allow_force_pushes":false,"allow_deletions":false}'
+  printf '%s' "$prot" | gh api -X PUT "repos/$repo/branches/main/protection" --input - >/dev/null 2>&1 && echo "✓ GitHub: main 보호 (PR 필수, CI 통과 필수)" || echo "! main 보호 설정 실패 (private + Free 플랜이면 불가) — git 훅이 대신 막는다"
 fi
 cat <<MSG
 초기화 완료: $name · 나: @$owner

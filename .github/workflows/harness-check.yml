@@ -26,11 +26,18 @@ jobs:
     name: claim 정리 (main)
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
-    permissions: { contents: write }
+    permissions: { contents: write, pull-requests: write }
     steps:
       - uses: actions/checkout@v4
         with: { fetch-depth: 0 }
-      - run: |
+      - env: { GH_TOKEN: "${{ secrets.GITHUB_TOKEN }}" }
+        run: |
           git config user.name harness-bot && git config user.email harness-bot@users.noreply.github.com
           sh scripts/collab.sh prune
-          git diff --cached --quiet || { git commit -m "chore(collab): prune claims" && COLLAB_ALLOW_PROTECTED_PUSH=1 git push; }
+          git diff --cached --quiet && exit 0
+          git commit -m "chore(collab): prune claims"
+          # main 이 보호돼 있으면 직접 push 가 막힌다 → PR 을 열고 auto-merge 로 넘긴다
+          if ! COLLAB_ALLOW_PROTECTED_PUSH=1 git push 2>/dev/null; then
+            b="chore/prune-$(date +%Y%m%d-%H%M%S)"; git switch -c "$b" && git push -u origin "$b"
+            gh pr create --title "chore(collab): prune claims" --body "머지된 브랜치의 claim 정리 (CI 자동)" && gh pr merge --auto --squash "$b" || true
+          fi
