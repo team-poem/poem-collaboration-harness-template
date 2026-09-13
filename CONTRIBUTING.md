@@ -3,9 +3,9 @@
 에이전트용 규칙은 `CLAUDE.md`. 이건 사람이 지키는 것. 외울 규칙은 셋이다. **시작에 claim, 끝에 저널, 남한테 할 말은 `ask @핸들`.**
 
 ## 처음 한 번
-- 클론 후 `git config collab.me <핸들>` (공백·하이픈 없이). 저널 파일명과 `@멘션` 에 쓰인다.
-- `git config core.hooksPath .githooks`. 커밋·push 검사가 도구와 무관하게 걸린다 (init.sh 를 돌린 사람은 이미 돼 있다).
-- Claude Code 든 Codex 든 같다. 훅이 없는 도구면 세션 시작에 `sh scripts/collab.sh digest --fetch` 를 직접 친다.
+- 클론하고 `claude` 나 `codex` 를 켠다. 첫 세션은 온보딩이다 — 에이전트가 인사하고 핸들·테스트 명령·허브 파일을 물은 뒤 설정한다. 합류하는 사람은 핸들 하나만.
+- 훅이 없는 도구면 `sh harness/init.sh <이름> <핸들>` 또는 `sh harness/join.sh <핸들>`. 세션 시작에 `sh scripts/collab.sh digest --fetch` 를 직접 친다.
+- Claude Code 든 Codex 든 같다.
 - `git config rerere.enabled true` (init.sh 가 해준다). 같은 충돌을 두 번 풀지 않는다.
 
 ## 브랜치

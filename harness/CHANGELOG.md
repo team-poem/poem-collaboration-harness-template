@@ -2,6 +2,12 @@
 
 하위 프로젝트는 `harness/VERSION` 으로 어느 템플릿에서 왔는지 안다. 필요한 항목만 가져간다.
 
+## 0.0.5 — 첫 세션 온보딩
+- `collab.sh state` 가 리포 상태를 `setup`(플레이스홀더 남음) / `join`(개인 설정만 없음) / `ready` 로 판정. 세션 시작 훅이 준비 안 됐으면 협업 현황 대신 온보딩을 주입
+- `onboard` 스킬: 인사 → 메뉴(이 폴더 초기화 / 기존 GitHub 프로젝트에 붙이기 / 새 프로젝트 / 5분 설명) 또는 합류 절차 → 검증 → 첫 작업 제안. 허브 파일은 스택을 보고 에이전트가 먼저 제안
+- `harness/join.sh <핸들>`: 합류자 개인 설정(핸들·rerere·git 훅·sobaya sync). `harness/install-into.sh <리포>`: 기존 리포에 하네스 복사 + init (기존 AGENTS.md 보존)
+- 템플릿 개발 중엔 `git config collab.onboarded true` 로 건너뜀
+
 ## 0.0.4 — 동시 작업 점검 후 수정
 - 판정: squash/rebase 머지된 브랜치도 머지된 것으로 인식(유령 claim·중복 이벤트 제거). CI(detached HEAD)에서 자기 브랜치를 남으로 보던 것 수정. digest 한 실행 안 이벤트 중복 제거
 - 처리량: 허브 파일 차단을 "동료가 지금 편집 중(커밋 전)" 으로 좁힘. 커밋됐지만 미머지인 겹침은 알림 + 선행 PR 제안. claim `next:` 로 "곧 겹침" 예고. 동료 브랜치 마지막 커밋 시각, 14일 방치 표시

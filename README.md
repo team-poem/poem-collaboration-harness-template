@@ -39,9 +39,9 @@ harness/
   config.sh               PROTECTED_BRANCHES · HOTSPOTS · PULSE_* · AUTO_REBASE · SYNC_MODE · SOBAYA_ROOT
   attach-sobaya.sh        sobaya 결합 attach|sync|update|check · sobaya.lock (팀의 sobaya 커밋)
   sobaya/                 루트 세션용 훅 어댑터, sobaya 에 보내는 제안
-  init.sh · VERSION · CHANGELOG.md
+  init.sh · join.sh · install-into.sh · VERSION · CHANGELOG.md
 scripts/collab.sh         유일한 CLI. 훅·git 훅·CI·다른 하네스가 전부 이것만 부른다
-.agents/skills/           start-work · handoff (.claude/skills 는 심링크)
+.agents/skills/           onboard · start-work · handoff (.claude/skills 는 심링크)
 .claude/settings.json     Claude Code 훅 배선 → harness/hooks
 .codex/hooks.json         Codex 훅 배선 → 같은 harness/hooks
 .githooks/                pre-commit(guard 와 같은 판정) · pre-push(저널 경고). core.hooksPath 로 켬. 도구 무관
@@ -54,6 +54,7 @@ docs/guide.md             사람용 안내
 
 | 명령 | 누가 부르나 | 하는 일 |
 |---|---|---|
+| `state` | session-start 훅 | 온보딩 판정 `setup`/`join`/`ready` 와 감지 정보(핸들, 훅, sobaya, gh, 테스트 명령) |
 | `digest [--fetch] [--json]` | session-start 훅, 사람, 다른 하네스 | 나에게 온 질문 · 영향 있는 이벤트 · 동료 작업 중 · 같은 파일 만지는 중 · sobaya 버전. `--json` 은 아우터 루프 입력 |
 | `pulse` | post-edit 훅 | wip push → fetch → 새 겹침·새 이벤트 알림 → main 뒤처졌으면 따라잡기(rebase, sobaya 승인 브랜치는 merge). 깨끗한 트리에서만, 충돌이면 abort |
 | `guard <path>` / `guard --allow <path>` | guard 훅과 같은 판정을 CLI 로 | exit 2 = 차단. `--allow` 는 이 세션에서 허브 차단 해제 |
@@ -135,10 +136,14 @@ sh tests/sobaya.sh   # 가짜 sobaya 루트: 어댑터 라우팅 · cwd 경로 �
 
 훅을 고치면 셋 다 돌리고 `harness/CHANGELOG.md` 에 한 줄. 새 규칙에는 테스트를 붙인다.
 
-## 시작
+## 시작 — 첫 세션은 온보딩
 
-```sh
-sh harness/init.sh <project-name> <my-handle>   # 플레이스홀더 · git config collab.me · rerere · core.hooksPath
-# harness/config.sh 의 HOTSPOTS, AGENTS.md 의 - Test: 를 프로젝트에 맞게
-# 합류자: git config collab.me <handle> && git config rerere.enabled true && git config core.hooksPath .githooks
-```
+사람이 칠 명령은 없다. 클론한 폴더에서 `claude` 나 `codex` 를 켜면 세션 시작 훅이 `collab.sh state` 로 리포 상태를 보고, 준비가 안 됐으면 협업 현황 대신 **온보딩**을 주입한다. 에이전트는 onboard 스킬대로 인사하고 진행한다.
+
+| state | 뜻 | 흐름 |
+|---|---|---|
+| `setup` | 플레이스홀더가 남아 있음 (프로젝트 미초기화) | 메뉴: 이 폴더를 프로젝트로 초기화 / 기존 GitHub 프로젝트에 붙이기(`install-into.sh`) / 새 프로젝트 만들기(`gh repo create --template`) / 먼저 5분 설명 |
+| `join` | 프로젝트는 준비됨, 이 사람의 설정만 없음 (핸들·git 훅·sobaya) | 핸들만 묻고 `join.sh` |
+| `ready` | 둘 다 됨 | 협업 현황(digest) |
+
+훅이 없는 환경: `sh harness/init.sh <이름> <핸들>` (만드는 사람) 또는 `sh harness/join.sh <핸들>` (합류하는 사람). 템플릿 자체를 개발할 때는 `git config collab.onboarded true` 로 온보딩을 건너뛴다.

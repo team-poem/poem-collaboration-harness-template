@@ -313,27 +313,24 @@ Claude → handoff → 저널(events: changed lib/api/cart.ts addToCart 가 stoc
 | `touching <경로>` `done <경로>` | 만지는 중 / 끝남 | 피함 / 자유롭게 |
 | `ask @핸들` `reply @핸들` | 질문 / 답 | 사용자에게 전달, 답은 이벤트로 |
 
-## 시작하기
+## 시작하기 — 클론하고 켜면 끝
 
 ```sh
-# 새 프로젝트 (GitHub "Use this template" 후)
-git clone <repo> && cd <repo>
-sh harness/init.sh <project-name> <my-handle>       # 플레이스홀더 치환, git config collab.me, rerere
-#  → harness/config.sh 의 HOTSPOTS 를 이 프로젝트의 허브 파일로 맞춘다
-git add -A && git commit -m "chore: init collaboration harness" && git push
-
-# 합류하는 사람 (클론 후 한 번)
-git config collab.me <handle> && git config rerere.enabled true
-
-claude          # 협업 현황이 먼저 뜬다. 첫 작업은 start-work
+git clone <리포> && cd <리포>
+claude        # 또는 codex
 ```
 
-| 스킬 | 언제 | 하는 일 |
-|---|---|---|
-| `start-work` | 새 작업. 훅이 "claim 없음" 으로 막았을 때. 남의 브랜치 이어받을 때 | 브랜치 + claim + push |
-| `handoff` | 세션 끝, PR 전 | 저널(이벤트 + 남은 것) + claim status + `collab.sh check` + push |
+처음 켜면 에이전트가 먼저 인사한다.
 
-`scripts/collab.sh` 하나에 `digest` `pulse` `guard` `check` `prune` 이 있다. 훅도, 사람도, 나중에 붙는 하네스도 이것만 부른다.
+> 안녕하세요, 포엠 협업 하네스입니다. 어떻게 시작할까요?
+> 1. 이 폴더를 프로젝트로 초기화  2. 이미 있는 GitHub 프로젝트에 붙이기  3. 새 프로젝트 만들기  4. 먼저 5분 설명 듣기
+
+핸들, 테스트 명령, 허브 파일(스택을 보고 에이전트가 먼저 제안한다), sobaya 를 쓸지 정도를 물은 뒤 알아서 설정한다. 3분.
+이미 설정된 팀 프로젝트에 **합류**하는 사람은 메뉴 없이 핸들 하나만 묻고 끝난다.
+
+끝나면 협업 현황이 뜨고, 외울 규칙 셋을 알려준다. **시작에 claim, 끝에 저널, 남한테 할 말은 `ask @핸들`.**
+
+훅이 안 붙는 도구라면 `sh harness/init.sh <이름> <핸들>` (만드는 사람) 또는 `sh harness/join.sh <핸들>` (합류하는 사람).
 
 ## Claude 든 Codex 든 같게 도는 이유
 
