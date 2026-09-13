@@ -6,6 +6,8 @@
 #   pulse                       내 작업 트리 스냅샷 올리기 + 원격 당겨오기. 새 겹침·새 이벤트·main 변경(자동 rebase)만 출력
 #   guard <path> | --allow <path>   쓰기 판정(exit 2 = 차단). --allow 는 이 세션에서 그 경로의 허브 차단을 해제
 #   check [--base REF]          PR 규칙 검사. 위반 시 exit 1. CI 와 handoff 가 사용
+#   run -- <명령...>            sobaya 루프처럼 워커가 파일을 고치는 명령을 감싼다. 전: 동료가 편집 중인 허브 파일이면 중단. 후: 워커가 건드린 허브 파일 보고
+#   worktree <branch>           sobaya 승인이 이 클론에 있으면 새 브랜치를 워크트리로 연다 (승인 상태가 git-dir 당 하나라 브랜치 전환이 깨짐)
 #   prune                       main 전용. 머지·소멸 브랜치의 claim 삭제
 #   wip                         git post-commit 이 부른다. 작업 트리 스냅샷 push + fetch + 새 겹침 경고(stderr). 자동 따라잡기 없음
 #   pr-body                     PR 본문 생성 (claim goal, 저널 이벤트, 겹친 파일, 검증 칸). handoff 가 gh pr create 에 쓴다
@@ -207,6 +209,31 @@ pr-body)
   echo; echo "## 다른 열린 브랜치와 겹친 파일"; ov="$(sh "$0" check 2>/dev/null | sed -n 's/^! 다른 열린 브랜치와 같은 파일을 바꿈://p')"; echo "${ov:-없음}"
   sd="$(g rev-parse --absolute-git-dir 2>/dev/null)/sobaya/state.json"; [ -f "$sd" ] && command -v jq >/dev/null && { echo; echo "## sobaya"; echo "- review 바인딩 HEAD: $(jq -r '.review.head // "없음"' "$sd" 2>/dev/null | cut -c1-7) · 현재 HEAD: $(g rev-parse --short HEAD)"; }
   echo; echo "## 검증"; echo "<!-- 실제로 돌린 것만 -->"; exit 0 ;;
+run)
+  [ "${1:-}" = "--" ] && shift; [ $# -gt 0 ] || { echo "사용: collab.sh run -- <명령...>"; exit 1; }
+  is_protected_branch "$BR" && { echo "보호 브랜치($BR)에서는 워커를 돌리지 않습니다. start-work 스킬로 브랜치와 claim 을 만드세요." >&2; exit 1; }
+  [ -f "$(claim_path_for "$BR")" ] || { echo "claim 이 없습니다. start-work 스킬 먼저." >&2; exit 1; }
+  do_fetch 5 >/dev/null 2>&1; wip_table
+  busy=""; for h in $HOTSPOTS; do w="$(editing_now "$h")"; [ -n "$w" ] && busy="$busy
+- $h ← $(printf '%s' "$w" | awk -F"$TAB" '{printf "@%s(%s) ", $1, $2}')편집 중"; done
+  if [ -n "$busy" ] && [ -z "${COLLAB_RUN_FORCE:-}" ]; then
+    printf '중단: 동료가 지금 편집 중인 허브 파일이 있습니다. 워커는 훅을 거치지 않아 같은 파일을 고치면 머지 충돌이 납니다.%s\n상대가 커밋하면 풀립니다. 그래도 돌리려면 COLLAB_RUN_FORCE=1.\n' "$busy" >&2; exit 1; fi
+  before="$(g rev-parse HEAD 2>/dev/null)"; "$@"; rc=$?
+  wip_push >/dev/null 2>&1; wip_table
+  touched="$( { g diff --name-only "$before" HEAD 2>/dev/null; g status --porcelain 2>/dev/null | awk '{print $NF}'; } | sort -u)"
+  hot=""; for f in $touched; do is_hotspot "$f" && hot="$hot $f"; done
+  if [ -n "$hot" ]; then echo "협업: 워커가 허브 파일을 건드렸습니다:$hot" >&2
+    for f in $hot; do w="$(touching_now "$f")"; [ -n "$w" ] && echo "  ⚠ $f 는 $(printf '%s' "$w" | awk -F"$TAB" '{printf "@%s(%s, %s) ", $1, $2, $4}')도 바꾸는 중 — 머지 때 충돌. 작은 선행 PR 로 먼저 머지하거나 상대와 순서를 정하세요." >&2; done
+    echo "  → 저널 이벤트에 changed/migrated 로 남기고, 사용자에게 알리세요." >&2; fi
+  exit $rc ;;
+worktree)
+  b="${1:-}"; [ -n "$b" ] || { echo "사용: collab.sh worktree <branch>"; exit 1; }
+  [ -n "$MAIN" ] || { echo "origin/main 이 없습니다"; exit 1; }
+  dir="$(dirname "$ROOT")/$(basename "$ROOT")-$(branch_slug "$b")"
+  if sobaya_approved; then echo "이 클론에 sobaya 승인 상태가 있어 새 브랜치는 워크트리로 엽니다: $dir"; else echo "워크트리로 엽니다: $dir"; fi
+  g worktree add -q "$dir" -b "$b" "$MAIN" || exit 1
+  git -C "$dir" config collab.me "$ME" >/dev/null 2>&1; git -C "$dir" config core.hooksPath .githooks >/dev/null 2>&1
+  echo "다음: cd $dir 에서 세션을 열고 start-work 를 이어서 (claim 작성·push). sobaya 는 그 디렉토리를 앱으로 지정해 실행."; exit 0 ;;
 guard)
   if [ "${1:-}" = "--allow" ]; then echo "$2" >> "$CACHE/allow"; echo "이 세션에서 $2 허용"; exit 0; fi
   p="$(rel_path "${1:-}")" || exit 0; check_write "$p" && exit 0; printf '%s\n' "$REASON" >&2; exit 2 ;;

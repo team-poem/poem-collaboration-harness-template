@@ -23,7 +23,8 @@ goal 이 허브 파일(`harness/config.sh` HOTSPOTS: 스키마, lockfile, 공용
 
 ## sobaya 로 구현할 브랜치라면 (harness/sobaya.lock 이 있으면 기본)
 5. `bash <sobaya>/tdd-set/bin/install.sh .` (앱 안에서) 또는 `tdd-set/bin/install.sh apps/<이름>` (루트에서) — 이 브랜치의 `spec.md`, `failed-test.md` 가 없으면 만든다. main 에는 없으므로 새 브랜치마다 새로 생긴다.
-6. 이 클론에 이미 sobaya 승인 상태가 있는 브랜치가 있으면(`status.sh` 로 확인) 새 브랜치는 **워크트리**로 연다: `git worktree add ../<앱>-<slug> -b <branch> origin/main`. sobaya 의 승인 상태는 git-dir 마다 하나라 같은 클론에서 브랜치를 오가면 승인이 깨진다.
+6. 이 클론에 이미 sobaya 승인 상태가 있는 브랜치가 있으면 새 브랜치는 **워크트리**로 연다: `sh scripts/collab.sh worktree <branch>` (2번 대신). sobaya 의 승인 상태는 git-dir 마다 하나라 같은 클론에서 브랜치를 오가면 승인이 깨진다.
+   sobaya 명령은 항상 `sh scripts/collab.sh run -- tdd-set/bin/loop.sh <앱> N` 처럼 감싸서 돌린다. 동료가 허브 파일을 편집 중이면 시작 전에 멈춘다.
 7. 사용자와 spec.md 와 실패 테스트 초안을 채우고, 사용자가 승인하면 `approve.sh`. 이후 구현은 `step.sh`/`loop.sh` 가 한다. 이 파일들은 sobaya 가 보호하므로 에이전트가 직접 고치지 않는다.
 
 ## 이어받기 (남의 브랜치에서 계속할 때)

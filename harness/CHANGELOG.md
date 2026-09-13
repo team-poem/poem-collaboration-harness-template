@@ -2,6 +2,12 @@
 
 하위 프로젝트는 `harness/VERSION` 으로 어느 템플릿에서 왔는지 안다. 필요한 항목만 가져간다.
 
+## 0.0.7 — sobaya 는 바꾸지 않는다 (sobaya#4 흡수)
+- amazon 의 결정에 따라 9개 요청을 전부 협업 하네스 규칙으로 흡수. `harness/sobaya/PROPOSAL.md` → `RULES.md` (성질 ↔ 우리 규칙 표)
+- `collab.sh run -- <명령>`: 워커 실행 전 동료가 편집 중인 허브 파일이면 중단(`COLLAB_RUN_FORCE=1` 강행), 실행 후 워커가 건드린 허브 파일과 겹침 보고
+- `collab.sh worktree <branch>`: 승인 브랜치가 있는 클론에서 새 브랜치를 워크트리로 (설정 복사)
+- AGENTS.md §8, start-work 스킬에 반영
+
 ## 0.0.6 — 온보딩 실전 테스트 후 수정
 - 실제 클론에서 Claude 를 띄워 온보딩을 끝까지 돌려봄. 초기화 커밋의 첫 push 를 우리 pre-push 가 막던 것 수정: 하네스 메타만 바뀐 push 와 원격에 없던 브랜치의 첫 publish 는 통과
 - GitHub 정책(squash·브랜치 삭제·main 보호)을 `init.sh` 에서 빼서 `harness/github-policy.sh` 로. 첫 push 뒤 온보딩이 부른다 (보호를 먼저 걸면 초기화 커밋을 못 올린다)

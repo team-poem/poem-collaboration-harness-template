@@ -62,6 +62,8 @@ docs/guide.md             사람용 안내
 | `wip` | `.githooks/post-commit` | 커밋마다 작업 트리 스냅샷 push + 브랜치 push(upstream 있으면) + 겹침 경고. sobaya 체크포인트 커밋도 여기 걸린다 |
 | `pr-body` | handoff | claim goal + 저널 이벤트 + 겹친 파일 + sobaya review HEAD 로 PR 본문 |
 | `precommit` / `prepush` | `.githooks/` | 스테이지된 파일마다 guard 판정 / 보호 브랜치로의 push 차단, 저널 없는 push 경고 |
+| `run -- <명령>` | start-work·사람 (sobaya 루프) | 워커 실행 전 동료가 편집 중인 허브 파일이면 중단, 실행 후 워커가 건드린 허브 파일 보고 |
+| `worktree <branch>` | start-work | 승인 브랜치가 있는 클론에서 새 브랜치를 워크트리로 (승인 상태 격리) |
 | `prune` | CI (main push), 사람 | 머지·소멸 브랜치의 claim 삭제 |
 
 ## 강제되는 것 (판정은 `harness/hooks/lib.sh` 의 `check_write` 한 곳)
@@ -121,7 +123,7 @@ start-work ──▶ (작업 · pulse · 커밋마다 wip) ──▶ handoff ─
 ## 다른 하네스와의 접점
 
 <a id="sobaya"></a>
-- **sobaya (개발 하네스)**: 이 리포는 `<sobaya>/apps/<이름>` 에 산다. `attach-sobaya.sh attach` 가 앱 계약(AGENTS.md `- Test:`), sobaya 의 `install.sh`, 루트 세션용 어댑터, `harness/sobaya.lock` 을 처리한다. 승인 브랜치는 merge 로 따라잡음. sobaya 에 바라는 변경은 `harness/sobaya/PROPOSAL.md`.
+- **sobaya (개발 하네스)**: 이 리포는 `<sobaya>/apps/<이름>` 에 산다. `attach-sobaya.sh attach` 가 앱 계약(AGENTS.md `- Test:`), sobaya 의 `install.sh`, 루트 세션용 어댑터, `harness/sobaya.lock` 을 처리한다. 승인 브랜치는 merge 로 따라잡음. sobaya 는 바꾸지 않는다 (amazon 결정, sobaya#4). 맞춤 규칙은 `harness/sobaya/RULES.md`.
 - **sobaya 버전 동기화**: `harness/sobaya.lock` 이 팀 기준. digest 가 클론과 다르면 `sync` 를 권하고, 주간 CI 가 upstream 이 앞서면 이슈. 올릴 때 `update` 후 lock 커밋.
 - **아우터 루프 (CI)**: `check` 의 "다른 열린 브랜치와 같은 파일", `digest --json` 의 `overlaps`. 자동 병합 순서는 그때.
 - **다른 도구**: `collab.sh guard <path>` 로 같은 판정, `digest --json` 으로 같은 현황. 파일 위치로 리포 루트를 찾으므로 워크스페이스 루트에서 앱 파일을 건드려도 그 앱의 규칙이 걸린다.

@@ -50,12 +50,13 @@
 대화·문서·커밋은 한국어, 코드·식별자·브랜치명은 영어.
 
 ## 8. 개발 하네스 sobaya 와 함께 쓸 때
-이 리포는 sobaya 워크스페이스의 `apps/<이름>` 에 산다. 구현은 sobaya 의 `tdd-set/bin/*`(승인된 실패 테스트 → 워커 구현 → 검증 → 체크포인트 커밋)가 하고,
-협업 하네스는 그 바깥에서 "누가 무엇을" 을 관리한다. 겹치는 규칙은 sobaya 의 `AGENTS.md`·`tdd-set/AGENTS.md` 를 따른다.
-- `spec.md` 와 `failed-test.md` 는 **브랜치(기능) 단위** 산출물이다. main 에 두지 않는다. handoff 가 PR 전에 `collab/journal/plans/<날짜-owner-slug>/` 로 옮기고 루트에서 지운다.
-- sobaya 승인 상태가 있는 브랜치는 main 을 **rebase 가 아니라 merge** 로 따라잡는다 (pulse 가 자동 판별). 승인 기준이 커밋 sha 라서 rebase 하면 깨진다.
-- 세션은 앱 안(`apps/<이름>`)에서 열어도 되고 sobaya 루트에서 열어도 된다. 루트에서는 `attach-sobaya.sh` 가 설치한 어댑터가 이 앱의 훅을 대신 부른다.
-- sobaya 버전은 `harness/sobaya.lock` 이 팀 기준이다. digest 가 "다르다" 고 하면 `sh harness/attach-sobaya.sh sync`.
+이 리포는 sobaya 워크스페이스의 `apps/<이름>` 에 산다. 구현은 sobaya 의 `tdd-set/bin/*` 가 하고, 협업 하네스는 그 바깥에서 "누가 무엇을" 을 관리한다. **sobaya 는 바꾸지 않는다.** 맞춤은 전부 이쪽 규칙이다 (`harness/sobaya/RULES.md`).
+- **워커는 `scripts/collab.sh run -- <sobaya 명령>` 으로 감싸서 돌린다.** 워커는 훅을 거치지 않으므로, 돌리기 전에 동료가 편집 중인 허브 파일이 있으면 중단하고, 끝난 뒤 워커가 건드린 허브 파일을 보고한다.
+- `spec.md` 와 `failed-test.md` 는 **브랜치(기능) 단위**. main 에 두지 않는다. handoff 가 gate·review 뒤 마지막 커밋으로 `collab/journal/plans/` 에 옮긴다. 그 뒤 이 브랜치에서 sobaya 명령을 다시 치지 않는다.
+- sobaya 승인 상태가 있는 브랜치는 main 을 **merge** 로 따라잡는다 (기본). rebase 하면 승인이 깨진다.
+- 이 클론에 승인 브랜치가 있으면 새 브랜치는 **워크트리**로: `scripts/collab.sh worktree <branch>`. 승인 상태가 git-dir 당 하나라 브랜치를 오가면 깨진다.
+- 세션은 앱 안에서 여는 게 기본. Claude 로 루트에서 열면 `attach-sobaya.sh` 가 놓은 어댑터가 이 앱의 훅을 대신 부른다.
+- sobaya 버전은 `harness/sobaya.lock` 이 팀 기준. digest 가 "다르다" 고 하면 `sh harness/attach-sobaya.sh sync`.
 
 ## 9. 위치
 `collab/active/<slug>/` claim + 브랜치 산출물 · `collab/journal/` 이벤트 로그 · `harness/config.sh` 설정(HOTSPOTS 등) · `harness/hooks/` 훅 스크립트 · `.githooks/` git 훅 · `scripts/collab.sh` 도구 · `harness/attach-sobaya.sh` sobaya 결합 · 사람용 절차 `CONTRIBUTING.md`

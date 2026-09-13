@@ -73,6 +73,20 @@ out="$(sh scripts/collab.sh pulse)"
 check "sobaya 항목 진행 중이면 따라잡기 보류"              "printf '%s' \"\$out\" | grep -q '보류' && ! git merge-base --is-ancestor origin/main HEAD"
 echo '{"baseline":"x","active":null}' > "$(git rev-parse --absolute-git-dir)/sobaya/state.json"
 
+echo "# run 래퍼와 worktree"
+# 동료(amazon)가 package.json 을 편집 중인 실제 wip ref 를 원격에 만든다 (run 은 fetch 후 wip 표를 다시 만들기 때문)
+echo '{"edited":1}' > package.json; sha="$(wip_snapshot)"; git checkout -q package.json; git push -q origin "$sha:refs/wip/amazon/feat--y"
+check "run: 동료가 편집 중인 허브 파일이면 중단"        "! sh scripts/collab.sh run -- true 2>'$R/err' && grep -q 'package.json' '$R/err'"
+check "run: COLLAB_RUN_FORCE=1 이면 실행"                "COLLAB_RUN_FORCE=1 sh scripts/collab.sh run -- sh -c 'echo ran > src/ran.txt' 2>/dev/null && [ -f src/ran.txt ]"
+rm -f src/ran.txt; git push -q origin --delete refs/wip/amazon/feat--y 2>/dev/null; git update-ref -d refs/wip/amazon/feat--y 2>/dev/null
+check "run: 워커가 허브 파일을 건드리면 보고"            "sh scripts/collab.sh run -- sh -c 'echo v > package.json' 2>'$R/err'; grep -q '허브 파일을 건드렸습니다' '$R/err' && grep -q 'package.json' '$R/err'"
+git checkout -q package.json
+check "run: 보호 브랜치에서는 거부"                      "git switch -q main && ! sh scripts/collab.sh run -- true 2>/dev/null; git switch -q feat/x"
+mkdir -p "$(git rev-parse --absolute-git-dir)/sobaya" && echo '{"baseline":"x"}' > "$(git rev-parse --absolute-git-dir)/sobaya/state.json"
+out="$(sh scripts/collab.sh worktree feat/z 2>&1)"; wt="$(dirname "$A")/$(basename "$A")-feat--z"
+check "worktree: 승인 상태 있으면 워크트리로, 설정 복사"  "printf '%s' \"\$out\" | grep -q '승인 상태' && [ -d '$wt' ] && [ \"\$(git -C '$wt' config collab.me)\" = solp ] && [ \"\$(git -C '$wt' rev-parse --abbrev-ref HEAD)\" = feat/z ]"
+git worktree remove --force "$wt" >/dev/null 2>&1; git branch -qD feat/z 2>/dev/null; rm -f "$(git rev-parse --absolute-git-dir)/sobaya/state.json"
+
 echo "# plan 파일 규칙"
 echo s > spec.md && echo f > failed-test.md && printf '# j\n\n## 이벤트\n- done src/ x\n\n## 남은 것\n- 없음\n' > "collab/journal/$today-solp-feat--x.md" && git add -A && git commit -qm plan
 check "check: 루트 spec.md/failed-test.md 가 PR 에 있으면 실패" "! sh scripts/collab.sh check --base origin/main > '$R/chk' 2>&1 && grep -q 'plan 보관' '$R/chk'"
