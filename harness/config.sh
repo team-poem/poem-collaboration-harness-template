@@ -23,8 +23,14 @@ PULSE_MAX_AGE_SEC=900
 # 동료의 작업 트리 스냅샷(refs/wip/<owner>)이 이보다 오래됐으면 "지금 만지는 중" 으로 보지 않는다
 WIP_STALE_SEC=7200
 
-# main 이 바뀌고 내 작업 트리가 깨끗하면 pulse 가 자동으로 rebase 한다. 충돌 시 즉시 abort 하고 알린다.
+# main 이 바뀌고 내 작업 트리가 깨끗하면 pulse 가 자동으로 따라잡는다. 충돌 시 즉시 abort 하고 알린다.
 AUTO_REBASE=true
+# 따라잡는 방식: auto | rebase | merge. auto = 이 브랜치에 sobaya 승인 상태(.git/sobaya/state.json)가 있으면 merge, 없으면 rebase.
+# (sobaya 의 승인 기준은 커밋 sha 라서 rebase 하면 깨진다. merge 는 조상 관계를 유지한다)
+SYNC_MODE=auto
+
+# 개발 하네스 sobaya 의 워크스페이스 루트. 비우면 이 리포의 두 단계 위(sobaya/apps/<이 리포>)를 본다.
+SOBAYA_ROOT=""
 
 # 동료 저널을 며칠 전까지 읽을지 (미머지 브랜치 저널은 기간 무관하게 읽는다)
 JOURNAL_LOOKBACK_DAYS=14

@@ -17,6 +17,7 @@ load_config() {
   : "${PROTECTED_BRANCHES:=main master develop}" "${CLAIM_DIR:=collab/active}" "${JOURNAL_DIR:=collab/journal}"
   : "${PROTECTED_BRANCH_ALLOW:=collab/ harness/ .claude/ .github/}" "${CLAIM_EXEMPT:=.claude/settings.local.json}"
   : "${HOTSPOTS:=}" "${PULSE_EVERY_EDITS:=15}" "${PULSE_MAX_AGE_SEC:=900}" "${WIP_STALE_SEC:=7200}" "${AUTO_REBASE:=true}" "${JOURNAL_LOOKBACK_DAYS:=14}"
+  : "${SYNC_MODE:=auto}" "${SOBAYA_ROOT:=}"
   CACHE="$ROOT/.claude/cache"; mkdir -p "$CACHE" 2>/dev/null
 }
 load_config
@@ -34,25 +35,27 @@ hook_read_input() { [ -n "$INPUT" ] || INPUT="$(cat)"; }
 _json_get() { if command -v jq >/dev/null 2>&1; then printf '%s' "$INPUT" | jq -r "$1 // empty" 2>/dev/null
   else key="${1##*.}"; printf '%s' "$INPUT" | sed -n "s/.*\"$key\"[[:space:]]*:[[:space:]]*\"\(\([^\"\\\\]\|\\\\.\)*\)\".*/\1/p" | head -n1; fi; }
 hook_tool() { hook_read_input; _json_get .tool_name; }
+hook_cwd() { hook_read_input; _json_get .cwd; }
 hook_command() { hook_read_input; _json_get .tool_input.command; }
 hook_flag() { hook_read_input; _json_get ".$1"; }
 # 대상 파일(없으면 cwd) 위치로 ROOT 를 다시 잡는다. 서브셸이 아닌 최상위에서 호출할 것 (ROOT 를 바꾼다).
 hook_reroot() {
-  hook_read_input; p="$(_json_get .tool_input.file_path)"; [ -n "$p" ] || p="$(_json_get .tool_input.notebook_path)"
-  case "$p" in /*) d="$(_norm_dir "$(dirname "$p")" || dirname "$p")" ;; *) d="$(_json_get .cwd)" ;; esac
+  hook_read_input; HOOK_CWD="$(_json_get .cwd)"; p="$(_json_get .tool_input.file_path)"; [ -n "$p" ] || p="$(_json_get .tool_input.notebook_path)"
+  case "$p" in /*) d="$(_norm_dir "$(dirname "$p")" || dirname "$p")" ;; *) d="$HOOK_CWD" ;; esac
   [ -n "$d" ] && r="$(find_root_from "$d")" && [ "$r" != "$ROOT" ] && { ROOT="$r"; load_config; }; return 0
 }
 hook_file_path() {  # 리포 상대경로. 리포 밖이면 return 1
   hook_read_input; p="$(_json_get .tool_input.file_path)"; [ -n "$p" ] || p="$(_json_get .tool_input.notebook_path)"; [ -n "$p" ] || return 1
   rel_path "$p"
 }
-rel_path() {  # 절대/상대 → 리포 상대 (심링크 정규화). 리포 밖이면 1
-  p="$1"; case "$p" in
-    /*) d="$(_norm_dir "$(dirname "$p")")" || d="$(dirname "$p")"; p="$d/$(basename "$p")"
-        case "$p" in "$ROOT"/*) p="${p#"$ROOT"/}" ;; *) return 1 ;; esac ;;
-    ./*) p="${p#./}" ;; esac
+rel_path() {  # 절대/상대 → 리포 상대 (심링크 정규화). 상대경로는 훅의 cwd(HOOK_CWD) 기준. 리포 밖이면 1
+  p="$1"
+  case "$p" in /*) ;; *) base="${HOOK_CWD:-}"; [ -n "$base" ] || base="$PWD"; p="$base/${p#./}" ;; esac
+  d="$(_norm_dir "$(dirname "$p")")" || d="$(dirname "$p")"; p="$d/$(basename "$p")"
+  case "$p" in "$ROOT"/*) p="${p#"$ROOT"/}" ;; *) return 1 ;; esac
   printf '%s' "$p"
 }
+HOOK_CWD=""
 
 # ---- git -------------------------------------------------------------------
 g() { git -C "$ROOT" "$@"; }
@@ -118,6 +121,15 @@ wip_table() {
 touching_now() { [ -f "$CACHE/wip.tsv" ] || return 0; while IFS="$TAB" read -r o age files; do for f in $files; do [ "$f" = "$1" ] && { printf '%s\t%s\n' "$o" "$age"; break; }; done; done < "$CACHE/wip.tsv"; }
 fmt_age() { s="$1"; [ "$s" -lt 60 ] && { echo "${s}초 전"; return; }; [ "$s" -lt 3600 ] && { echo "$((s/60))분 전"; return; }; echo "$((s/3600))시간 전"; }
 
+# ---- sobaya (개발 하네스) ------------------------------------------------------
+sobaya_root() {  # 설정값 → 두 단계 위(sobaya/apps/<이 리포>) 순으로 찾는다. 없으면 1
+  if [ -n "$SOBAYA_ROOT" ]; then [ -x "$SOBAYA_ROOT/tdd-set/bin/step.sh" ] && { printf '%s' "$SOBAYA_ROOT"; return 0; }; return 1; fi
+  c="$(_norm_dir "$ROOT/../..")" && [ -x "$c/tdd-set/bin/step.sh" ] && { printf '%s' "$c"; return 0; }; return 1
+}
+sobaya_lock() { [ -f "$ROOT/harness/sobaya.lock" ] && sed -n 's/^sha=//p' "$ROOT/harness/sobaya.lock"; }
+sobaya_approved() { d="$(g rev-parse --absolute-git-dir 2>/dev/null)" && [ -f "$d/sobaya/state.json" ]; }
+sync_mode() { case "$SYNC_MODE" in rebase|merge) printf '%s' "$SYNC_MODE" ;; *) sobaya_approved && printf merge || printf rebase ;; esac; }
+
 # ---- 쓰기 검사: 훅과 CLI 가 같은 판정을 쓴다 ----------------------------------
 # check_write <리포상대경로> → 0 허용 / 2 차단 (REASON 에 메시지)
 REASON=""
@@ -166,9 +178,15 @@ check_command() {
     case "$t" in ~*|/dev/*|/tmp/*|/private/tmp/*|*://*) continue ;; esac
     case "$t" in */*|*.*) ;; *) continue ;; esac
     case "$t" in *.sh|*.py|*.js|*.ts|*.rb|*.pl) [ -x "$ROOT/$t" ] && continue ;; esac
-    rp="$(rel_path "$t")" || continue; case "$rp" in node_modules/*|.git/*|.) continue ;; esac; found=1
+    # 토큰이 다른 리포(예: sobaya 루트에서 apps/<x>/…)를 가리키면 그 리포의 규칙으로 판정
+    case "$t" in /*) td="$t" ;; *) td="${HOOK_CWD:-$PWD}/${t#./}" ;; esac
+    tr="$(find_root_from "$(_norm_dir "$(dirname "$td")" || dirname "$td")")" || tr=""
+    saved_root="$ROOT"; [ -n "$tr" ] && [ "$tr" != "$ROOT" ] && { ROOT="$tr"; load_config; }
+    rp="$(rel_path "$t")" || { ROOT="$saved_root"; load_config; continue; }
+    case "$rp" in node_modules/*|.git/*|.) ROOT="$saved_root"; load_config; continue ;; esac; found=1
     check_write "$rp" || blocked="$blocked
 - $rp: $REASON"
+    [ "$ROOT" != "$saved_root" ] && { ROOT="$saved_root"; load_config; }
   done
   [ -n "$blocked" ] && { REASON="차단 (Bash 로 파일 쓰기):$blocked"; return 2; }
   if [ $found -eq 0 ]; then

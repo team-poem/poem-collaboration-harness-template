@@ -93,6 +93,12 @@ digest)
     else echo "- 없음"; fi
     echo; echo "## 동료 작업 중"
     if [ -s "$O" ]; then while IFS="$TAB" read -r b o st goal age files; do echo "- $b · @$o · $st · $goal"; [ "$files" != "-" ] && echo "  지금 만지는 파일 ($(fmt_age "$age")): $files"; done < "$O"; else echo "- 없음"; fi
+    if sr="$(sobaya_root)"; then lk="$(sobaya_lock)"; hd="$(git -C "$sr" rev-parse --short HEAD 2>/dev/null)"
+      echo; echo "## 개발 하네스 (sobaya)"
+      if [ -z "$lk" ]; then echo "- sobaya 워크스페이스 감지($sr). 아직 붙이지 않음 → sh harness/attach-sobaya.sh attach"
+      elif [ "$(git -C "$sr" rev-parse HEAD 2>/dev/null)" != "$lk" ]; then echo "- 내 sobaya($hd)가 팀이 검증한 버전(${lk%"${lk#???????}"})과 다릅니다 → sh harness/attach-sobaya.sh sync"
+      else echo "- sobaya $hd · 팀 검증 버전과 일치$( sobaya_approved && echo ' · 이 브랜치는 승인 상태 있음(main 따라잡기는 merge)')"; fi
+    fi
     echo; echo "## 지금 같은 파일을 만지는 중"
     if [ -s "$V" ]; then while IFS="$TAB" read -r fpath o age kind; do echo "- $fpath ← @$o ($(fmt_age "$age"))$( [ "$kind" = hotspot ] && echo ' · 허브 파일: 차단됨. 상대가 끝나길 기다린다')"; done < "$V"
       echo "  → 같은 부분을 고치는 것 같으면 사용자에게 알린다. 작게 커밋하고 자주 pulse 한다."
@@ -103,7 +109,6 @@ digest)
 pulse)
   is_protected_branch "$BR" && exit 0
   [ -f "$CACHE/overlaps.prev" ] || : > "$CACHE/overlaps.prev"
-  oldmain="$( [ -n "$MAIN" ] && g rev-parse "$MAIN" 2>/dev/null)"
   wip_push; do_fetch 5 || { now_epoch > "$CACHE/pulse.at"; exit 0; }
   out=""; wip_table; MYF="$(my_files)"
   # 새 겹침 (파일 단위)
@@ -123,18 +128,23 @@ $a"
     if [ -n "$e" ]; then out="$out
 $e"; sh "$0" digest >/dev/null 2>&1; fi   # 텍스트 digest 를 한 번 돌려 seen 에 기록
   fi
-  # main 변경 → 자동 rebase
+  # main 보다 뒤처졌으면 따라잡는다 (origin/main 이 언제 바뀌었든, 내 HEAD 에 아직 없으면)
   if [ -n "$MAIN" ]; then newmain="$(g rev-parse "$MAIN" 2>/dev/null)"
-    if [ -n "$oldmain" ] && [ "$newmain" != "$oldmain" ] && ! g merge-base --is-ancestor "$newmain" HEAD 2>/dev/null; then
-      printf '%s\n' "$MYF" > "$CACHE/_myf"; hit="$(g diff --name-only "$oldmain" "$newmain" 2>/dev/null | grep -Fx -f "$CACHE/_myf" 2>/dev/null | tr '\n' ' ')"; rm -f "$CACHE/_myf"
+    if [ -n "$newmain" ] && ! g merge-base --is-ancestor "$newmain" HEAD 2>/dev/null; then
+      mb="$(g merge-base HEAD "$newmain" 2>/dev/null)"; printf '%s\n' "$MYF" > "$CACHE/_myf"
+      hit="$(g diff --name-only "$mb" "$newmain" 2>/dev/null | grep -Fx -f "$CACHE/_myf" 2>/dev/null | tr '\n' ' ')"; rm -f "$CACHE/_myf"
+      mode="$(sync_mode)"
       if [ "$AUTO_REBASE" = true ] && tree_clean; then
-        if g rebase -q --autostash "$MAIN" >/dev/null 2>&1; then out="$out
-- main 이 갱신되어 자동으로 rebase 했습니다.${hit:+ 내 파일과 겹친 변경: $hit — 다시 확인하세요.}"
-        else files="$(g diff --name-only --diff-filter=U 2>/dev/null | tr '\n' ' ')"; g rebase --abort >/dev/null 2>&1
+        if [ "$mode" = merge ]; then ok_sync() { g merge -q --no-edit "$MAIN" >/dev/null 2>&1; }; undo_sync() { g merge --abort >/dev/null 2>&1; }
+        else ok_sync() { g rebase -q --autostash "$MAIN" >/dev/null 2>&1; }; undo_sync() { g rebase --abort >/dev/null 2>&1; }; fi
+        if ok_sync; then out="$out
+- main 이 갱신되어 자동으로 $mode 했습니다.${hit:+ 내 파일과 겹친 변경: $hit — 다시 확인하세요.}$( [ "$mode" = merge ] && echo ' (sobaya 승인 브랜치라 rebase 대신 merge)')"
+        else files="$(g diff --name-only --diff-filter=U 2>/dev/null | tr '\n' ' ')"; undo_sync
           out="$out
-- main 과 충돌: $files. 자동 rebase 를 되돌렸습니다. 사용자에게 알리고, 상대 저널의 이벤트를 참고해 'git rebase $MAIN' 으로 직접 해결하세요."; fi
-      else out="$out
-- main 이 갱신됐습니다.${hit:+ 내 파일과 겹침: $hit.} 커밋한 뒤 'git rebase $MAIN' 하세요 (작업 트리가 깨끗하면 다음 pulse 가 자동으로 합니다)."; fi
+- main 과 충돌: $files. 자동 $mode 를 되돌렸습니다. 사용자에게 알리고, 상대 저널의 이벤트를 참고해 'git $mode $MAIN' 으로 직접 해결하세요."; fi
+      elif [ "$(cat "$CACHE/main.notified" 2>/dev/null)" != "$newmain" ]; then echo "$newmain" > "$CACHE/main.notified"
+        out="$out
+- main 이 갱신됐습니다.${hit:+ 내 파일과 겹침: $hit.} 커밋한 뒤 'git $mode $MAIN' 하세요 (작업 트리가 깨끗하면 다음 pulse 가 자동으로 합니다)."; fi
     fi
   fi
   now_epoch > "$CACHE/pulse.at"; [ -n "$out" ] && printf '%s\n' "$out" | sed '/^$/d' ;;
@@ -154,11 +164,13 @@ check)
     [ "$(branch_slug "$(claim_get "$cp" branch)")" = "$(basename "$(dirname "$cp")")" ] || V "$cp: branch 가 디렉토리명과 다름"
     case "$(claim_get "$cp" status)" in active|paused|done) ;; *) V "$cp: status 는 active|paused|done" ;; esac
   else V "claim 없음: $cp (Skill: start-work)"; fi
-  journals="$(printf '%s\n' "$changed" | awk '$1=="A"{print $2}' | grep "^$JOURNAL_DIR/.*\.md$" | grep -v README || true)"
+  journals="$(printf '%s\n' "$changed" | awk '$1=="A"{print $2}' | grep "^$JOURNAL_DIR/[^/]*\.md$" | grep -v README || true)"
   [ -n "$journals" ] || V "저널 없음. $JOURNAL_DIR/ 에 새 파일 (Skill: handoff)"
   for j in $journals; do for h in "이벤트" "남은 것"; do grep -q "^## $h" "$j" || V "$j: '## $h' 절 없음"; done
     basename "$j" | grep -Eq '^[0-9]{4}-[0-9]{2}-[0-9]{2}-[^-]+-' || V "$j: 파일명은 YYYY-MM-DD-<owner>-<slug>.md"; done
   printf '%s\n' "$changed" | awk '$1~/^[MD]/{print $2}' | grep -q "^$JOURNAL_DIR/.*\.md$" && V "기존 저널을 수정/삭제함 (append-only)"
+  # sobaya 의 브랜치 산출물(spec.md, failed-test.md)이 main 으로 가면 다음 브랜치와 충돌한다
+  for f in spec.md failed-test.md; do printf '%s\n' "$files" | grep -qx "$f" && V "$f 가 PR 에 포함됨. handoff 의 'plan 보관' 절차로 collab/journal/plans/ 에 옮기고 루트에서 지울 것"; done
   others="$(printf '%s\n' "$files" | grep "^$CLAIM_DIR/" | grep -v "^$(claim_dir_for "$branch")/" | grep -v README || true)"; [ -n "$others" ] && V "다른 브랜치의 claim 을 건드림: $(echo "$others" | tr '\n' ' ')"
   agent=false; g log --format='%(trailers:key=Assisted-by,valueonly)' "$mb..HEAD" 2>/dev/null | grep -q . && agent=true
   # 다른 열린 브랜치와 같은 파일을 바꿨는가 (정보)
