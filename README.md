@@ -21,7 +21,7 @@
 | 내가 올리는 것 | 어디에 | 언제 | 동료가 보는 것 |
 |---|---|---|---|
 | claim (`collab/active/<slug>/claim.md`) | 내 브랜치 | start-work 첫 커밋·push | "누가 무엇을 만드는 중" |
-| 작업 트리 스냅샷 | `refs/wip/<me>` (숨은 ref) | pulse (수정 15회 또는 15분마다) | "지금 어느 파일을 만지는 중" — 커밋 전이라도 |
+| 작업 트리 스냅샷 | `refs/wip/<me>/<branch-slug>` (숨은 ref) | pulse (수정 15회 또는 15분마다) + 커밋마다 | "지금 편집 중인 파일 / 브랜치에 커밋된 파일" — 커밋 전이라도 |
 | 저널 (`collab/journal/<날짜>-<me>-<slug>.md`) | 내 브랜치 | handoff | "무엇을 바꿨고 상대가 무엇을 해야 하나" (이벤트) |
 
 동료 세션은 시작 때와 pulse 때 `git fetch` 로 이 셋을 읽는다. 저널은 전부가 아니라 **나에게 영향 있는 이벤트만** 주입된다.
@@ -58,7 +58,9 @@ docs/guide.md             사람용 안내
 | `pulse` | post-edit 훅 | wip push → fetch → 새 겹침·새 이벤트 알림 → main 뒤처졌으면 따라잡기(rebase, sobaya 승인 브랜치는 merge). 깨끗한 트리에서만, 충돌이면 abort |
 | `guard <path>` / `guard --allow <path>` | guard 훅과 같은 판정을 CLI 로 | exit 2 = 차단. `--allow` 는 이 세션에서 허브 차단 해제 |
 | `check [--base REF]` | handoff, CI | PR 규칙: claim 형식, 저널 존재와 필수 절, append-only, 남의 claim, 루트 plan 파일, 다른 브랜치와 겹친 파일(정보) |
-| `precommit` / `prepush` | `.githooks/` | 스테이지된 파일마다 guard 판정 / 저널 없는 push 경고 |
+| `wip` | `.githooks/post-commit` | 커밋마다 작업 트리 스냅샷 push + 브랜치 push(upstream 있으면) + 겹침 경고. sobaya 체크포인트 커밋도 여기 걸린다 |
+| `pr-body` | handoff | claim goal + 저널 이벤트 + 겹친 파일 + sobaya review HEAD 로 PR 본문 |
+| `precommit` / `prepush` | `.githooks/` | 스테이지된 파일마다 guard 판정 / 보호 브랜치로의 push 차단, 저널 없는 push 경고 |
 | `prune` | CI (main push), 사람 | 머지·소멸 브랜치의 claim 삭제 |
 
 ## 강제되는 것 (판정은 `harness/hooks/lib.sh` 의 `check_write` 한 곳)
@@ -68,8 +70,9 @@ docs/guide.md             사람용 안내
 | claim 없는 브랜치에서 수정 | 차단 | 차단 | claim 없으면 실패 |
 | 보호 브랜치(main)에서 코드 수정 | 차단 | 차단 | — |
 | 커밋된 저널 수정 · 남의 claim 수정 | 차단 | 차단 | 실패 |
-| 동료가 지금 만지는 허브 파일(HOTSPOTS) | 차단 (`--allow` 로 해제) | — | — |
-| 동료가 지금 만지는 그 외 파일 | 알림 (파일당 1회) | — | 정보 |
+| 동료가 지금 **편집 중**(커밋 전)인 허브 파일(HOTSPOTS) | 차단 (`--allow` 로 해제) | 경고 | — |
+| 동료 브랜치에 커밋됐지만 미머지인 파일 · 그 외 겹침 | 알림 (선행 PR 제안) | — | 정보 |
+| 보호 브랜치로 직접 push · 로컬 머지 | — | 차단 (pre-push, pre-merge-commit) | — |
 | 코드 변경 있는데 저널 없이 종료 | Stop 훅이 1회 세움 | pre-push 경고 | 저널 없으면 실패 |
 | 루트 `spec.md`·`failed-test.md` 가 PR 에 포함 | — | — | 실패 |
 
@@ -77,7 +80,7 @@ docs/guide.md             사람용 안내
 
 ## 데이터 형식
 
-**claim** — frontmatter 5키. scope 없음. "영역 점유" 가 아니라 "무엇을 만드는가".
+**claim** — frontmatter 5키 + 선택 `next:`. scope 없음. "영역 점유" 가 아니라 "무엇을 만드는가". `next:` 는 다음에 만질 공유 파일 (동료 세션에 "곧 겹침" 으로 뜬다).
 ```
 ---
 branch: feat/checkout
@@ -103,10 +106,10 @@ goal: 결제 페이지
 ## 흐름
 
 ```
-start-work ──▶ (작업 · pulse) ──▶ handoff ──▶ PR ──▶ 머지 ──▶ CI prune
- 브랜치           wip push/fetch     저널          check
- claim push       겹침 알림/차단      claim status
-                  main 따라잡기       check · push
+start-work ──▶ (작업 · pulse · 커밋마다 wip) ──▶ handoff ──▶ PR(squash) ──▶ 브랜치 삭제 ──▶ CI prune
+ 브랜치           wip push/fetch                  저널          pr-body
+ claim push       겹침 알림/차단                   claim status   제목 = goal
+                  main 을 merge 로 따라잡기         check · push
 ```
 
 - **start-work**: 보호 브랜치면 `git switch -c <type>/<slug> origin/main`. `collab/active/<slug>/claim.md` 작성, 첫 커밋으로 push. sobaya 를 쓰면 `install.sh` 로 이 브랜치의 `spec.md`·`failed-test.md` 생성.

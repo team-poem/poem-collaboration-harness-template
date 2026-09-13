@@ -27,3 +27,15 @@ Claude Code 는 부모 디렉토리의 `CLAUDE.md` 를 읽지만 `AGENTS.md` 는
 협업 하네스는 `.githooks/pre-commit` 을 `core.hooksPath` 로 켜고, 그 안에서 sobaya 의 앱 pre-commit(`.git/hooks/pre-commit`)을 이어서 실행한다.
 그런데 `install.sh` 는 `core.hooksPath` 가 잡혀 있으면 "existing pre-commit hook preserved" 로 중단한다. 협업 하네스는 install 동안 hooksPath 를 잠깐 풀었다 되돌리는 식으로 우회한다.
 `--chain` 옵션이나 "hooksPath 훅이 sobaya 훅을 exec 하면 통과" 규칙이 있으면 우회가 사라진다.
+
+## 7. 워커에게 허브 파일을 알리기
+협업 하네스의 `harness/config.sh` HOTSPOTS(스키마, lockfile 등)는 동시 수정이 곧 충돌인 파일이다. 워커는 에디터 훅을 거치지 않으므로 지금은 아무것도 막지 못한다.
+워커 프롬프트에 "이 목록은 수정하지 말고 필요하면 결과 보고에 적어라" 를 넣어 주면 사람이 선행 PR 로 처리할 수 있다.
+
+## 8. 승인 상태를 브랜치별로
+`state.json` 이 git-dir 당 하나라 같은 클론에서 브랜치를 오가면 `Baseline must be an ancestor of HEAD` 로 깨지고 `--replace` 마다 호출 한도가 리셋된다.
+`sobaya/<branch-slug>/state.json` 이면 워크트리 없이도 브랜치 전환이 된다. 협업 하네스는 그때까지 "승인 브랜치가 있으면 새 브랜치는 워크트리" 로 안내한다.
+
+## 9. review 바인딩과 plan 이동
+협업 하네스는 PR 전에 `spec.md`·`failed-test.md` 를 `collab/journal/plans/` 로 옮긴다(두 브랜치가 같은 루트 경로를 쓰면 충돌·승인 파괴). 이 커밋으로 HEAD 가 바뀌어 `review.head` 와 어긋난다.
+gate/review 가 `collab/journal/plans/<...>/failed-test.md` 경로도 인식하거나, 2번(plan 경로 설정)이 되면 이동 자체가 필요 없다.
