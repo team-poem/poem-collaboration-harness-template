@@ -1,0 +1,30 @@
+name: sobaya-upstream
+# 팀이 고정한 sobaya 버전(harness/sobaya.lock)보다 upstream 이 앞서면 이슈를 연다. 주 1회 + 수동.
+on:
+  schedule: [{ cron: "0 0 * * 1" }]
+  workflow_dispatch:
+permissions: { issues: write, contents: read }
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: lock vs upstream
+        env: { GH_TOKEN: "${{ secrets.GITHUB_TOKEN }}" }
+        run: |
+          [ -f harness/sobaya.lock ] || { echo "lock 없음 — sobaya 미결합"; exit 0; }
+          lock=$(sed -n 's/^sha=//p' harness/sobaya.lock)
+          up=$(git ls-remote -q https://github.com/team-poem/sobaya.git HEAD | cut -f1)
+          [ -n "$up" ] || { echo "upstream 조회 실패"; exit 0; }
+          title="sobaya 업데이트 있음"
+          if [ "$lock" = "$up" ]; then
+            echo "최신"; n=$(gh issue list --search "$title in:title" --state open --json number --jq '.[0].number'); [ -n "$n" ] && gh issue close "$n" -c "lock 이 upstream 과 같아졌습니다."; exit 0; fi
+          body="팀 lock: \`${lock:0:7}\` · upstream: \`${up:0:7}\`
+
+\`\`\`sh
+sh harness/attach-sobaya.sh update   # sobaya 클론 pull + 앱 계약 재설치 + lock 갱신
+git add harness/sobaya.lock && git commit -m \"chore: sobaya ${up:0:7}\" && git push
+\`\`\`
+변경 내용: https://github.com/team-poem/sobaya/compare/${lock:0:7}...${up:0:7}"
+          n=$(gh issue list --search "$title in:title" --state open --json number --jq '.[0].number')
+          if [ -n "$n" ]; then gh issue edit "$n" --body "$body"; else gh issue create --title "$title" --body "$body" --label harness 2>/dev/null || gh issue create --title "$title" --body "$body"; fi
