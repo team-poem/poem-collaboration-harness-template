@@ -6,8 +6,10 @@
 #   guard <path> | --allow <path>   쓰기 판정(exit 2 = 차단). --allow 는 이 세션에서 그 경로의 허브 차단을 해제
 #   check [--base REF]          PR 규칙 검사. 위반 시 exit 1. CI 와 handoff 가 사용
 #   prune                       main 전용. 머지·소멸 브랜치의 claim 삭제
+#   wip                         git post-commit 이 부른다. 작업 트리 스냅샷 push + fetch + 새 겹침 경고(stderr). 자동 따라잡기 없음
+#   pr-body                     PR 본문 생성 (claim goal, 저널 이벤트, 겹친 파일, 검증 칸). handoff 가 gh pr create 에 쓴다
 #   precommit                   git pre-commit 이 부른다. 스테이지된 파일마다 guard 와 같은 판정 (도구가 무엇이든)
-#   prepush                     git pre-push 가 부른다. 저널 없이 push 하면 경고 (막지는 않음)
+#   prepush                     git pre-push 가 부른다. 보호 브랜치로의 push 차단, 저널 없는 push 경고
 set -u
 HERE="$(cd "$(dirname "$0")" && pwd -P)"
 export CLAUDE_PROJECT_DIR="${CLAUDE_PROJECT_DIR:-$(cd "$HERE/.." && pwd -P)}"
@@ -22,16 +24,23 @@ do_fetch() { g fetch -q --prune origin '+refs/heads/*:refs/remotes/origin/*' '+r
 unmerged_files() { if [ -n "$MAIN" ]; then g diff --name-only --diff-filter=A "$MAIN...$1" -- "$2" 2>/dev/null; else g ls-tree -r --name-only "$1" -- "$2" 2>/dev/null; fi | grep -v '/README\.md$'; }
 journal_owner() { basename "$1" | sed -E 's/^[0-9]{4}-[0-9]{2}-[0-9]{2}-([^-]+)-.*/\1/'; }
 my_last_journal_date() { ls "$JOURNAL_DIR"/*-"$ME"-*.md 2>/dev/null | sort | tail -n1 | xargs -I{} basename {} | cut -c1-10; }
-seen() { [ -f "$CACHE/seen" ] && grep -qxF "$1" "$CACHE/seen"; }
-mark_seen() { echo "$1" >> "$CACHE/seen"; }
+SEEN="$(branch_cache seen)"; ASKED="$(branch_cache asked)"; OVPREV="$(branch_cache overlaps.prev)"
+seen() { [ -f "$SEEN" ] && grep -qxF "$1" "$SEEN"; }
+mark_seen() { echo "$1" >> "$SEEN"; }
 event_id() { printf '%s' "$1" | cksum | cut -d' ' -f1; }
 # 이벤트 줄 "- <type> <path?> <text>" → "type<TAB>path<TAB>text" (path 는 / 또는 . 을 포함한 두 번째 토큰)
 parse_event() { sed 's/^[[:space:]]*-[[:space:]]*//' | awk '{
-  t=$1; p="-"; s=2; if ($2 ~ /[\/.]/ && $2 !~ /^@/) { p=$2; s=3 }
+  t=$1; p="-"; s=2; if ($2 ~ /\// && $2 !~ /^@/) { p=$2; s=3 }
   txt=""; for (i=s;i<=NF;i++) txt=txt (i>s?" ":"") $i; printf "%s\t%s\t%s\n", t, p, txt }'; }
 # 내 파일이 이 경로를 import 하는가 (확장자 뗀 경로의 마지막 두 조각으로 grep)
-imported_by_me() { key="$(printf '%s' "$1" | sed -E 's/\.[a-zA-Z]+$//' | awk -F/ '{print (NF>1? $(NF-1)"/"$NF : $NF)}')"
-  [ -n "$key" ] && [ -n "$MYF" ] && printf '%s\n' "$MYF" | xargs grep -l -- "$key" 2>/dev/null | grep -q .; }
+imported_by_me() {  # 내 파일이 그 경로를 import 하는가. 직접(dir/file), 디렉토리 배럴(dir), 파일명 순으로 넓혀 본다. 미탐보다 오탐이 낫다
+  [ -n "$MYF" ] || return 1; base="$(printf '%s' "$1" | sed -E 's/\.[a-zA-Z]+$//; s#/index$##')"
+  dir="$(dirname "$base")"; file="$(basename "$base")"; keys="$base"
+  [ "$dir" != "." ] && keys="$keys
+$dir
+$(basename "$dir")/$file"
+  printf '%s\n' "$keys" | sort -u | while IFS= read -r k; do [ -n "$k" ] || continue
+    printf '%s\n' "$MYF" | xargs grep -lE -- "from ['\"][^'\"]*$k(/[^'\"]*)?['\"]|require\(['\"][^'\"]*$k" 2>/dev/null | grep -q . && echo hit; done | grep -q hit; }
 # 이벤트가 나에게 영향 있는가: type, path
 affects_me() { case "$1" in
   changed|migrated|removed) [ "$2" != "-" ] && { printf '%s\n' "$MYF" | grep -qx "$2" || imported_by_me "$2"; } ;;
@@ -58,31 +67,37 @@ digest)
   wip_table; MYF="$(my_files)"; MINE="$(claim_path_for "$BR")"; lastj="$(my_last_journal_date)"
   # 수집: asks, events, others, overlaps → 임시 파일
   A="$CACHE/_asks"; E="$CACHE/_events"; O="$CACHE/_others"; V="$CACHE/_overlaps"; : > "$A"; : > "$E"; : > "$O"; : > "$V"
+  : > "$CACHE/_ids"
   other_journals | sort -t"$TAB" -k2 | while IFS="$TAB" read -r ref j b o; do
     jd="$(basename "$j" | cut -c1-10)"; tmp="$(mktemp)"; g show "$ref:$j" > "$tmp" 2>/dev/null
     md_section "$tmp" "이벤트" | while IFS= read -r line; do
-      id="$(event_id "$j|$line")"; ev="$(printf '%s\n' "$line" | parse_event)"; t="${ev%%$TAB*}"; rest="${ev#*$TAB}"; p="${rest%%$TAB*}"; txt="${rest#*$TAB}"
+      id="$(event_id "$j|$line")"; grep -qxF "$id" "$CACHE/_ids" && continue; echo "$id" >> "$CACHE/_ids"; ev="$(printf '%s\n' "$line" | parse_event)"; t="${ev%%$TAB*}"; rest="${ev#*$TAB}"; p="${rest%%$TAB*}"; txt="${rest#*$TAB}"
       if [ "$t" = ask ] && printf '%s' "$txt" | grep -q "@$ME\b"; then replied "$o" "$jd" || printf '%s\t%s\t%s\t%s\t%s\n' "$id" "$b" "$o" "$j" "$txt" >> "$A"; continue; fi
       printf '%s' "$txt" | grep -q "@$ME\b" && { seen "$id" || printf '%s\t%s\t%s\t%s\t%s %s\n' "$id" "$b" "$o" "$j" "$t" "$txt" >> "$A"; continue; }
       seen "$id" && continue; affects_me "$t" "$p" || continue
       printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$id" "$b" "$o" "$j" "$t" "$p" "$txt" >> "$E"
     done; rm -f "$tmp"
   done
-  _others() { o="$(claim_get "$2" owner)"; st="$(claim_get "$2" status)"; files=""; age=""
-    [ -f "$CACHE/wip.tsv" ] && line="$(grep "^$o$TAB" "$CACHE/wip.tsv")" && { age="$(printf '%s' "$line" | cut -f2)"; files="$(printf '%s' "$line" | cut -f3)"; }
-    printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$1" "${o:--}" "${st:-active}" "$(claim_get "$2" goal)" "${age:--}" "${files:--}" >> "$O"
-    for f in $files; do [ "$f" = "-" ] && continue; printf '%s\n' "$MYF" | grep -qx "$f" && printf '%s\t%s\t%s\t%s\n' "$f" "$o" "$age" "$( is_hotspot "$f" && echo hotspot || echo file)" >> "$V"; done; }
+  _others() { o="$(claim_get "$2" owner)"; st="$(claim_get "$2" status)"; slug="$(branch_slug "$1")"; unc=""; com=""; age=""
+    [ -f "$CACHE/wip.tsv" ] && line="$(grep "^$o$TAB$slug$TAB" "$CACHE/wip.tsv" | head -n1)" && [ -n "$line" ] && { age="$(printf '%s' "$line" | cut -f3)"; unc="$(printf '%s' "$line" | cut -f4)"; com="$(printf '%s' "$line" | cut -f5)"; }
+    last="$(g log -1 --format=%cr "$3" 2>/dev/null)"; days=$(( ( $(now_epoch) - $(g log -1 --format=%ct "$3" 2>/dev/null || echo 0) ) / 86400 ))
+    nxt="$(claim_get "$2" next)"
+    printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$1" "${o:--}" "${st:-active}" "$(claim_get "$2" goal)" "${age:--}" "${unc:--}" "${com:--}" "${last:--}$( [ $days -ge 14 ] && echo ' · 방치?')" "${nxt:--}" >> "$O"
+    for f in $unc; do [ "$f" = "-" ] && continue; printf '%s\n' "$MYF" | grep -qx "$f" && printf '%s\t%s\t%s\t%s\n' "$f" "$o" "$age" "$( is_hotspot "$f" && echo hotspot || echo file)" >> "$V"; done
+    for f in $com; do [ "$f" = "-" ] && continue; printf '%s\n' "$MYF" | grep -qx "$f" && printf '%s\t%s\t%s\t%s\n' "$f" "$o" "$age" "committed" >> "$V"; done
+    for f in $nxt; do case "$f" in */*|*.*) printf '%s\n' "$MYF" | grep -qx "$f" && printf '%s\t%s\t%s\t%s\n' "$f" "$o" "-" "next" >> "$V" ;; esac; done; }
   for_each_other_claim _others
   if [ $json = 1 ]; then
     printf '{"me":"%s","branch":"%s","claim":' "$(esc "$ME")" "$(esc "$BR")"
     if [ -f "$MINE" ]; then printf '{"goal":"%s","status":"%s","owner":"%s"}' "$(esc "$(claim_get "$MINE" goal)")" "$(esc "$(claim_get "$MINE" status)")" "$(esc "$(claim_get "$MINE" owner)")"; else printf 'null'; fi
     printf ',"asks":['; f=1; while IFS="$TAB" read -r id b o j txt; do [ $f = 1 ] || printf ','; f=0; printf '{"id":"%s","from":"%s","branch":"%s","text":"%s","journal":"%s"}' "$id" "$(esc "$o")" "$(esc "$b")" "$(esc "$txt")" "$(esc "$j")"; done < "$A"
     printf '],"events":['; f=1; while IFS="$TAB" read -r id b o j t p txt; do [ $f = 1 ] || printf ','; f=0; printf '{"type":"%s","path":"%s","text":"%s","from":"%s","branch":"%s"}' "$(esc "$t")" "$(esc "$p")" "$(esc "$txt")" "$(esc "$o")" "$(esc "$b")"; done < "$E"
-    printf '],"others":['; f=1; while IFS="$TAB" read -r b o st goal age files; do [ $f = 1 ] || printf ','; f=0; printf '{"branch":"%s","owner":"%s","status":"%s","goal":"%s","wip_age":%s,"touching":%s}' "$(esc "$b")" "$(esc "$o")" "$(esc "$st")" "$(esc "$goal")" "$( [ "$age" = "-" ] && echo null || echo "$age")" "$( [ "$files" = "-" ] && echo '[]' || printf '%s\n' $files | jarr)"; done < "$O"
+    printf '],"others":['; f=1; while IFS="$TAB" read -r b o st goal age unc com last nxt; do [ $f = 1 ] || printf ','; f=0; printf '{"branch":"%s","owner":"%s","status":"%s","goal":"%s","wip_age":%s,"editing":%s,"committed":%s,"last_commit":"%s","next":"%s"}' "$(esc "$b")" "$(esc "$o")" "$(esc "$st")" "$(esc "$goal")" "$( [ "$age" = "-" ] && echo null || echo "$age")" "$( [ "$unc" = "-" ] && echo '[]' || printf '%s\n' $unc | jarr)" "$( [ "$com" = "-" ] && echo '[]' || printf '%s\n' $com | jarr)" "$(esc "$last")" "$(esc "$nxt")"; done < "$O"
     printf '],"overlaps":['; f=1; while IFS="$TAB" read -r fpath o age kind; do [ $f = 1 ] || printf ','; f=0; printf '{"path":"%s","owner":"%s","wip_age":%s,"kind":"%s"}' "$(esc "$fpath")" "$(esc "$o")" "$age" "$kind"; done < "$V"
     printf ']}\n'
   else
     echo "# 협업 현황 (자동 주입) · 나: @$ME · 브랜치: ${BR:-?}${fetch_note:+ · $fetch_note}"
+    [ "$(g config --get core.hooksPath 2>/dev/null)" = ".githooks" ] || echo "! git 훅이 꺼져 있습니다 → git config core.hooksPath .githooks (커밋·push 검사가 도구와 무관하게 걸린다)"
     echo; echo "## 나에게 온 질문·메시지 (답은 내 저널 이벤트에 'reply @상대' 로)"
     if [ -s "$A" ]; then while IFS="$TAB" read -r id b o j txt; do echo "- @$o ($b): $txt"; done < "$A"; else echo "- 없음"; fi
     echo; echo "## 내 claim"
@@ -94,7 +109,10 @@ digest)
       echo "  → changed/migrated/removed 는 내 코드가 깨졌을 수 있다는 뜻. 작업 전에 해당 호출부를 확인한다. added 는 중복 구현 금지. rule 은 따른다."
     else echo "- 없음"; fi
     echo; echo "## 동료 작업 중"
-    if [ -s "$O" ]; then while IFS="$TAB" read -r b o st goal age files; do echo "- $b · @$o · $st · $goal"; [ "$files" != "-" ] && echo "  지금 만지는 파일 ($(fmt_age "$age")): $files"; done < "$O"; else echo "- 없음"; fi
+    if [ -s "$O" ]; then while IFS="$TAB" read -r b o st goal age unc com last nxt; do echo "- $b · @$o · $st · $goal · 마지막 커밋 $last"
+        [ "$unc" != "-" ] && echo "  지금 편집 중 ($(fmt_age "$age")): $unc"
+        [ "$com" != "-" ] && echo "  브랜치에 커밋됨(미머지): $com"
+        [ "$nxt" != "-" ] && echo "  다음에 만질 것: $nxt"; done < "$O"; else echo "- 없음"; fi
     if sr="$(sobaya_root)"; then lk="$(sobaya_lock)"; hd="$(git -C "$sr" rev-parse --short HEAD 2>/dev/null)"
       echo; echo "## 개발 하네스 (sobaya)"
       if [ -z "$lk" ]; then echo "- sobaya 워크스페이스 감지($sr). 아직 붙이지 않음 → sh harness/attach-sobaya.sh attach"
@@ -102,28 +120,35 @@ digest)
       else echo "- sobaya $hd · 팀 검증 버전과 일치$( sobaya_approved && echo ' · 이 브랜치는 승인 상태 있음(main 따라잡기는 merge)')"; fi
     fi
     echo; echo "## 지금 같은 파일을 만지는 중"
-    if [ -s "$V" ]; then while IFS="$TAB" read -r fpath o age kind; do echo "- $fpath ← @$o ($(fmt_age "$age"))$( [ "$kind" = hotspot ] && echo ' · 허브 파일: 차단됨. 상대가 끝나길 기다린다')"; done < "$V"
-      echo "  → 같은 부분을 고치는 것 같으면 사용자에게 알린다. 작게 커밋하고 자주 pulse 한다."
+    if [ -s "$V" ]; then while IFS="$TAB" read -r fpath o age kind; do case "$kind" in
+        hotspot) echo "- $fpath ← @$o 편집 중 ($(fmt_age "$age")) · 허브 파일: 차단됨. 상대가 커밋하면 풀린다" ;;
+        file) echo "- $fpath ← @$o 편집 중 ($(fmt_age "$age"))" ;;
+        committed) echo "- $fpath ← @$o 브랜치에 커밋됨(미머지). 먼저 머지되는 쪽이 이기고 나중 쪽이 따라잡는다 — 공유 파일이면 작은 선행 PR 로 먼저 머지하자고 제안" ;;
+        next) echo "- $fpath ← @$o 가 다음에 만질 예정(claim next:). 지금 내가 끝내고 머지하거나, 상대와 순서를 맞춘다" ;; esac; done < "$V"
+      echo "  → 같은 부분을 고치는 것 같으면 사용자에게 알린다. 작게 커밋하고 자주 push 한다."
     else echo "- 없음"; fi
   fi
-  rm -f "$A" "$E" "$O" "$V"; now_epoch > "$CACHE/pulse.at" ;;
+  rm -f "$A" "$E" "$O" "$V" "$CACHE/_ids"; now_epoch > "$CACHE/pulse.at" ;;
 
 pulse)
   is_protected_branch "$BR" && exit 0
-  [ -f "$CACHE/overlaps.prev" ] || : > "$CACHE/overlaps.prev"
+  [ -f "$OVPREV" ] || : > "$OVPREV"
   wip_push; do_fetch 5 || { now_epoch > "$CACHE/pulse.at"; exit 0; }
   out=""; wip_table; MYF="$(my_files)"
   # 새 겹침 (파일 단위)
-  new=""; [ -f "$CACHE/wip.tsv" ] && while IFS="$TAB" read -r o age files; do for f in $files; do [ "$f" = "-" ] && continue
-    printf '%s\n' "$MYF" | grep -qx "$f" || continue; grep -qxF "$f@$o" "$CACHE/overlaps.prev" && continue
-    echo "$f@$o" >> "$CACHE/overlaps.prev"; new="$new
-- 겹침: $f 를 @$o 도 만지는 중 ($(fmt_age "$age"))$( is_hotspot "$f" && echo ' · 허브 파일이라 이제부터 차단됨')"; done; done < "$CACHE/wip.tsv"
+  new=""; [ -f "$CACHE/wip.tsv" ] && while IFS="$TAB" read -r o slug age unc com; do
+    for f in $unc; do [ "$f" = "-" ] && continue; printf '%s\n' "$MYF" | grep -qx "$f" || continue; grep -qxF "$f@$o/$slug" "$OVPREV" && continue
+      echo "$f@$o/$slug" >> "$OVPREV"; new="$new
+- 겹침: $f 를 @$o($slug) 도 지금 편집 중 ($(fmt_age "$age"))$( is_hotspot "$f" && echo ' · 허브 파일이라 이제부터 차단됨')"; done
+    for f in $com; do [ "$f" = "-" ] && continue; printf '%s\n' "$MYF" | grep -qx "$f" || continue; grep -qxF "$f@$o/$slug:c" "$OVPREV" && continue
+      echo "$f@$o/$slug:c" >> "$OVPREV"; new="$new
+- 겹침(커밋됨): $f 를 @$o($slug) 브랜치가 이미 바꿨습니다. 머지 때 만납니다 — 공유 파일이면 작은 선행 PR 을 제안하세요"; done; done < "$CACHE/wip.tsv"
   [ -n "$new" ] && out="$out$new"
   # 새 이벤트·질문 (digest 와 같은 필터, seen 제외)
   ev="$(sh "$0" digest --json 2>/dev/null)"
   if command -v jq >/dev/null 2>&1 && [ -n "$ev" ]; then
-    touch "$CACHE/asked"
-    a="$(printf '%s' "$ev" | jq -r '.asks[] | "\(.id)\t- 질문 @\(.from): \(.text)"' 2>/dev/null | while IFS="$TAB" read -r id line; do grep -qxF "$id" "$CACHE/asked" && continue; echo "$id" >> "$CACHE/asked"; echo "$line"; done)"
+    touch "$ASKED"
+    a="$(printf '%s' "$ev" | jq -r '.asks[] | "\(.id)\t- 질문 @\(.from): \(.text)"' 2>/dev/null | while IFS="$TAB" read -r id line; do grep -qxF "$id" "$ASKED" && continue; echo "$id" >> "$ASKED"; echo "$line"; done)"
     [ -n "$a" ] && out="$out
 $a"
     e="$(printf '%s' "$ev" | jq -r '.events[] | "- [\(.type)] \(.path|sub("^-$";"")) \(.text) (@\(.from))"' 2>/dev/null)"
@@ -136,7 +161,9 @@ $e"; sh "$0" digest >/dev/null 2>&1; fi   # 텍스트 digest 를 한 번 돌려 
       mb="$(g merge-base HEAD "$newmain" 2>/dev/null)"; printf '%s\n' "$MYF" > "$CACHE/_myf"
       hit="$(g diff --name-only "$mb" "$newmain" 2>/dev/null | grep -Fx -f "$CACHE/_myf" 2>/dev/null | tr '\n' ' ')"; rm -f "$CACHE/_myf"
       mode="$(sync_mode)"
-      if [ "$AUTO_REBASE" = true ] && tree_clean; then
+      if sobaya_busy; then [ "$(cat "$CACHE/main.notified" 2>/dev/null)" != "$newmain" ] && { echo "$newmain" > "$CACHE/main.notified"; out="$out
+- main 이 갱신됐지만 sobaya 가 항목을 진행 중이라 따라잡기를 보류합니다.${hit:+ 내 파일과 겹침: $hit.} 루프가 끝나면 다음 pulse 가 합니다."; }
+      elif [ "$AUTO_REBASE" = true ] && tree_clean; then
         if [ "$mode" = merge ]; then ok_sync() { g merge -q --no-edit "$MAIN" >/dev/null 2>&1; }; undo_sync() { g merge --abort >/dev/null 2>&1; }
         else ok_sync() { g rebase -q --autostash "$MAIN" >/dev/null 2>&1; }; undo_sync() { g rebase --abort >/dev/null 2>&1; }; fi
         if ok_sync; then out="$out
@@ -151,6 +178,20 @@ $e"; sh "$0" digest >/dev/null 2>&1; fi   # 텍스트 digest 를 한 번 돌려 
   fi
   now_epoch > "$CACHE/pulse.at"; [ -n "$out" ] && printf '%s\n' "$out" | sed '/^$/d' ;;
 
+wip)
+  is_protected_branch "$BR" && exit 0; [ -f "$(claim_path_for "$BR")" ] || exit 0
+  wip_push; g rev-parse -q --verify "@{upstream}" >/dev/null 2>&1 && g push -q origin HEAD >/dev/null 2>&1
+  do_fetch 5 || exit 0; wip_table; MYF="$(my_files)"
+  [ -f "$CACHE/wip.tsv" ] && while IFS="$TAB" read -r o slug age unc com; do for f in $unc $com; do [ "$f" = "-" ] && continue
+    printf '%s\n' "$MYF" | grep -qx "$f" && echo "협업: $f 를 @$o($slug) 도 바꾸는 중" >&2; done; done < "$CACHE/wip.tsv"; exit 0 ;;
+pr-body)
+  cp="$(claim_path_for "$BR")"; goal="$( [ -f "$cp" ] && claim_get "$cp" goal)"
+  echo "## 무엇을"; echo "${goal:-<claim goal>}"; echo
+  echo "## 동료가 알아야 할 이벤트"
+  for j in $(ls "$JOURNAL_DIR"/*-"$ME"-*.md 2>/dev/null | sort); do g cat-file -e "$( [ -n "$MAIN" ] && echo "$MAIN" || echo HEAD):$j" 2>/dev/null && continue; md_section "$j" "이벤트" | grep -E '^\s*-\s*(changed|added|removed|migrated|dep|rule)\b'; done | sed 's/^[[:space:]]*//' | sort -u | sed 's/^/- /; s/^- - /- /' | grep . || echo "- 없음"
+  echo; echo "## 다른 열린 브랜치와 겹친 파일"; ov="$(sh "$0" check 2>/dev/null | sed -n 's/^! 다른 열린 브랜치와 같은 파일을 바꿈://p')"; echo "${ov:-없음}"
+  sd="$(g rev-parse --absolute-git-dir 2>/dev/null)/sobaya/state.json"; [ -f "$sd" ] && command -v jq >/dev/null && { echo; echo "## sobaya"; echo "- review 바인딩 HEAD: $(jq -r '.review.head // "없음"' "$sd" 2>/dev/null | cut -c1-7) · 현재 HEAD: $(g rev-parse --short HEAD)"; }
+  echo; echo "## 검증"; echo "<!-- 실제로 돌린 것만 -->"; exit 0 ;;
 guard)
   if [ "${1:-}" = "--allow" ]; then echo "$2" >> "$CACHE/allow"; echo "이 세션에서 $2 허용"; exit 0; fi
   p="$(rel_path "${1:-}")" || exit 0; check_write "$p" && exit 0; printf '%s\n' "$REASON" >&2; exit 2 ;;
@@ -190,18 +231,30 @@ prune)
     r=""; g show-ref --verify --quiet "refs/remotes/origin/$b" && r="origin/$b"; [ -z "$r" ] && g show-ref --verify --quiet "refs/heads/$b" && r="$b"
     if [ -z "$r" ]; then echo "삭제: $d (브랜치 $b 없음)"; g rm -rq "$d"
     elif ref_merged "$r"; then echo "삭제: $d (브랜치 $b 머지됨)"; g rm -rq "$d"; fi; done
+  # 브랜치가 사라진 wip ref 정리
+  for ref in $(g for-each-ref --format='%(refname)' refs/wip 2>/dev/null); do rest="${ref#refs/wip/}"; slug="${rest#*/}"; [ "$rest" = "$slug" ] && continue
+    b="$(printf '%s' "$slug" | sed 's#--#/#g')"; g show-ref --verify --quiet "refs/remotes/origin/$b" || { echo "wip 정리: $ref"; g push -q origin --delete "$ref" >/dev/null 2>&1; g update-ref -d "$ref"; }; done
   echo "완료" ;;
 
 precommit)
   [ "$BR" = HEAD ] && exit 0
+  # 허브 파일을 동료가 지금 편집 중이면 경고만 (차단은 sobaya 의 커밋 단계를 깨뜨린다)
+  [ -f "$CACHE/wip.tsv" ] && [ $(( $(now_epoch) - $(cat "$CACHE/pulse.at" 2>/dev/null || echo 0) )) -lt 900 ] && g diff --cached --name-only | while IFS= read -r p; do
+    is_hotspot "$p" && w="$(editing_now "$p")" && [ -n "$w" ] && echo "주의: 허브 파일 $p 를 $(printf '%s' "$w" | cut -f1 | sed 's/^/@/' | tr '\n' ' ')도 지금 편집 중입니다. 머지 충돌 가능성이 높습니다." >&2; done
   export COLLAB_SKIP_WIP=1; bad=0
   g diff --cached --name-only --no-renames -z | tr '\0' '\n' | while IFS= read -r p; do [ -n "$p" ] || continue
     check_write "$p" || { printf '✗ %s\n  %s\n' "$p" "$REASON" >&2; echo bad; }; done | grep -q bad && bad=1
   [ $bad -eq 0 ] || { echo "커밋 차단 (협업 하네스). 위 안내대로 고친 뒤 다시 커밋하세요." >&2; exit 1; }; exit 0 ;;
 prepush)
+  # stdin: "<local ref> <local sha> <remote ref> <remote sha>" 줄들. 보호 브랜치로의 push 는 차단 (CI 는 COLLAB_ALLOW_PROTECTED_PUSH=1)
+  if [ -z "${COLLAB_ALLOW_PROTECTED_PUSH:-}" ] && [ ! -t 0 ]; then
+    while read -r lref lsha rref rsha; do [ -n "$rref" ] || continue; rb="${rref#refs/heads/}"
+      if is_protected_branch "$rb" && [ "$lsha" != "0000000000000000000000000000000000000000" ]; then
+        echo "차단: 보호 브랜치 $rb 로 직접 push 하지 않습니다. PR 로 머지하세요. (CI 나 관리자는 COLLAB_ALLOW_PROTECTED_PUSH=1)" >&2; exit 1; fi; done
+  fi
   is_protected_branch "$BR" && exit 0; [ -f "$(claim_path_for "$BR")" ] || exit 0
   [ -n "$(my_files | head -n1)" ] || exit 0
   [ -n "$MAIN" ] && g diff --name-only --diff-filter=A "$(g merge-base "$MAIN" HEAD)" HEAD -- "$JOURNAL_DIR" 2>/dev/null | grep -q "^$JOURNAL_DIR/[^/]*-$ME-" && exit 0
   echo "주의: 이 브랜치에 코드 변경이 있는데 내 저널이 없습니다. PR 전에 handoff 스킬(또는 collab/journal/ 에 이벤트 파일)을 남기세요. CI 가 PR 에서 막습니다." >&2; exit 0 ;;
-*) sed -n '2,11p' "$0"; exit 1 ;;
+*) sed -n '2,13p' "$0"; exit 1 ;;
 esac

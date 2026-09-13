@@ -22,6 +22,7 @@ load_config() {
 }
 load_config
 TAB="$(printf '\t')"
+branch_cache() { printf '%s/%s.%s' "$CACHE" "$1" "$(current_branch 2>/dev/null | sed 's#/#--#g')"; }   # 브랜치별 캐시 파일 (seen, asked, overlaps.prev)
 
 # ---- 나 / 시간 -------------------------------------------------------------
 me() { m="$(git -C "$ROOT" config collab.me 2>/dev/null)" || m="$(git -C "$ROOT" config user.name 2>/dev/null)" || m="$USER"; printf '%s' "$m" | tr ' -' '__'; }
@@ -63,7 +64,13 @@ current_branch() { g symbolic-ref --short -q HEAD 2>/dev/null || g rev-parse --a
 is_protected_branch() { for pb in $PROTECTED_BRANCHES; do [ "$1" = "$pb" ] && return 0; done; return 1; }
 main_ref() { for pb in $PROTECTED_BRANCHES; do g show-ref --verify --quiet "refs/remotes/origin/$pb" && { printf 'origin/%s' "$pb"; return; }; done
   for pb in $PROTECTED_BRANCHES; do g show-ref --verify --quiet "refs/heads/$pb" && { printf '%s' "$pb"; return; }; done; return 1; }
-ref_merged() { m="$(main_ref)" && g merge-base --is-ancestor "$1" "$m" 2>/dev/null; }
+ref_merged() {  # 조상이거나(merge), 브랜치가 바꾼 파일이 전부 main 과 같으면(squash/rebase 머지) 머지된 것
+  m="$(main_ref)" || return 1
+  g merge-base --is-ancestor "$1" "$m" 2>/dev/null && return 0
+  mb="$(g merge-base "$m" "$1" 2>/dev/null)" || return 1
+  files="$(g diff --name-only "$mb" "$1" -- . ':!collab' 2>/dev/null)"; [ -n "$files" ] || return 1
+  printf '%s\n' "$files" | tr '\n' '\0' | xargs -0 git -C "$ROOT" diff --quiet "$m" "$1" -- 2>/dev/null
+}
 branch_slug() { printf '%s' "$1" | sed 's#/#--#g'; }
 claim_dir_for() { printf '%s/%s' "$CLAIM_DIR" "$(branch_slug "$1")"; }
 claim_path_for() { printf '%s/claim.md' "$(claim_dir_for "$1")"; }
@@ -81,7 +88,7 @@ md_section() { awk -v h="## $2" '$0==h{on=1;next} /^## /{on=0} on && NF' "$1"; }
 
 # 다른 브랜치의 claim 순회. 콜백 $1 에 (branch, claim임시파일, ref). 현재·보호·머지된 브랜치 제외.
 for_each_other_claim() {
-  me_b="$(current_branch)"; seen=" "
+  me_b="${GITHUB_HEAD_REF:-$(current_branch)}"; seen=" "
   for ref in $(g for-each-ref --format='%(refname:short)' refs/remotes/origin refs/heads 2>/dev/null | grep -v '^origin/HEAD$' | grep -v '^origin$'); do
     b="${ref#origin/}"; [ "$b" = "$me_b" ] && continue; is_protected_branch "$b" && continue
     case "$seen" in *" $b "*) continue ;; esac; ref_merged "$ref" && continue
@@ -100,25 +107,34 @@ wip_snapshot() {
   tree="$(GIT_INDEX_FILE="$idx" g write-tree 2>/dev/null)" || return 1
   g commit-tree "$tree" -p HEAD -m "wip $(me) $(now_epoch)" 2>/dev/null
 }
-wip_push() { sha="$(wip_snapshot)" && [ -n "$sha" ] && g push -q -f origin "$sha:refs/wip/$(me)" >/dev/null 2>&1; }
+wip_ref() { printf 'refs/wip/%s/%s' "$(me)" "$(branch_slug "$(current_branch)")"; }
+wip_push() { sha="$(wip_snapshot)" && [ -n "$sha" ] && g push -q -f origin "$sha:$(wip_ref)" >/dev/null 2>&1; }
 wip_fetch() { g fetch -q --prune origin '+refs/wip/*:refs/wip/*' >/dev/null 2>&1; }
 
 # 내가 이 브랜치에서 바꾼 파일 (커밋 + 작업 트리)
 my_files() { m="$(main_ref)" || m=HEAD; { g diff --name-only "$(g merge-base "$m" HEAD 2>/dev/null || echo HEAD)" HEAD 2>/dev/null; g status --porcelain 2>/dev/null | awk '{print $NF}'; } | grep -v '^collab/' | sort -u; }
 
-# 동료들이 지금 만지는 파일 → $CACHE/wip.tsv : owner<TAB>age초<TAB>files(공백)
+# 동료들이 지금 만지는 파일 → $CACHE/wip.tsv : owner<TAB>branch-slug<TAB>age초<TAB>미커밋파일(공백)<TAB>커밋파일(공백)
+# 미커밋 = 스냅샷 부모(브랜치 HEAD) 이후 바뀐 것 (지금 이 순간 편집 중). 커밋 = main 이후 브랜치에 커밋된 것 (머지 때 만남).
 wip_table() {
   wt_out="$CACHE/wip.tsv"; : > "$wt_out.tmp"; m="$(main_ref)" || m=HEAD; my="$(me)"; now="$(now_epoch)"
   for ref in $(g for-each-ref --format='%(refname)' refs/wip 2>/dev/null); do
-    o="${ref#refs/wip/}"; [ "$o" = "$my" ] && continue
+    rest="${ref#refs/wip/}"; o="${rest%%/*}"; slug="${rest#*/}"; [ "$rest" = "$o" ] && slug="-"
+    [ "$o" = "$my" ] && [ "$slug" = "$(branch_slug "$(current_branch)")" ] && continue
     t="$(g log -1 --format=%ct "$ref" 2>/dev/null)" || continue; age=$((now - ${t:-0}))
     [ "$age" -gt "$WIP_STALE_SEC" ] && continue
-    files="$(g diff --name-only "$(g merge-base "$m" "$ref" 2>/dev/null || echo "$m")" "$ref" 2>/dev/null | grep -v '^collab/' | tr '\n' ' ')"
-    printf '%s\t%s\t%s\n' "$o" "$age" "${files:--}" >> "$wt_out.tmp"
+    parent="$(g rev-parse -q --verify "$ref^" 2>/dev/null || echo "$m")"
+    unc="$(g diff --name-only "$parent" "$ref" 2>/dev/null | grep -v '^collab/' | tr '\n' ' ')"
+    com="$(g diff --name-only "$(g merge-base "$m" "$parent" 2>/dev/null || echo "$m")" "$parent" 2>/dev/null | grep -v '^collab/' | tr '\n' ' ')"
+    printf '%s\t%s\t%s\t%s\t%s\n' "$o" "$slug" "$age" "${unc:--}" "${com:--}" >> "$wt_out.tmp"
   done; mv "$wt_out.tmp" "$wt_out"
 }
-# 경로를 지금 만지는 동료: "owner<TAB>age" 줄
-touching_now() { [ -f "$CACHE/wip.tsv" ] || return 0; while IFS="$TAB" read -r o age files; do for f in $files; do [ "$f" = "$1" ] && { printf '%s\t%s\n' "$o" "$age"; break; }; done; done < "$CACHE/wip.tsv"; }
+# 경로를 지금 만지는 동료: "owner<TAB>slug<TAB>age<TAB>kind" 줄. kind = editing(미커밋) | committed(브랜치에 커밋, 미머지)
+touching_now() { [ -f "$CACHE/wip.tsv" ] || return 0; while IFS="$TAB" read -r o slug age unc com; do
+    for f in $unc; do [ "$f" = "$1" ] && { printf '%s\t%s\t%s\tediting\n' "$o" "$slug" "$age"; continue 2; }; done
+    for f in $com; do [ "$f" = "$1" ] && { printf '%s\t%s\t%s\tcommitted\n' "$o" "$slug" "$age"; continue 2; }; done
+  done < "$CACHE/wip.tsv"; }
+editing_now() { touching_now "$1" | awk -F"$TAB" '$4=="editing"'; }
 fmt_age() { s="$1"; [ "$s" -lt 60 ] && { echo "${s}초 전"; return; }; [ "$s" -lt 3600 ] && { echo "$((s/60))분 전"; return; }; echo "$((s/3600))시간 전"; }
 
 # ---- sobaya (개발 하네스) ------------------------------------------------------
@@ -128,6 +144,11 @@ sobaya_root() {  # 설정값 → 두 단계 위(sobaya/apps/<이 리포>) 순으
 }
 sobaya_lock() { [ -f "$ROOT/harness/sobaya.lock" ] && sed -n 's/^sha=//p' "$ROOT/harness/sobaya.lock"; }
 sobaya_approved() { d="$(g rev-parse --absolute-git-dir 2>/dev/null)" && [ -f "$d/sobaya/state.json" ]; }
+sobaya_busy() {  # 루프가 잠금을 쥐고 있거나 항목이 진행 중이면 작업 트리를 건드리면 안 된다
+  d="$(g rev-parse --absolute-git-dir 2>/dev/null)" || return 1
+  [ -e "$d/sobaya/lock.shell" ] || [ -e "$d/sobaya/lock" ] && return 0
+  [ -f "$d/sobaya/state.json" ] && command -v jq >/dev/null 2>&1 && jq -e '.active != null' "$d/sobaya/state.json" >/dev/null 2>&1
+}
 sync_mode() { case "$SYNC_MODE" in rebase|merge) printf '%s' "$SYNC_MODE" ;; *) sobaya_approved && printf merge || printf rebase ;; esac; }
 
 # ---- 쓰기 검사: 훅과 CLI 가 같은 판정을 쓴다 ----------------------------------
@@ -155,10 +176,10 @@ check_write() {
   # 허브 파일을 동료가 지금 만지는 중이면 차단 (세션 중 사용자가 허용한 경로는 통과)
   if [ -z "${COLLAB_SKIP_WIP:-}" ] && is_hotspot "$p"; then
     [ -f "$CACHE/allow" ] && grep -qxF "$p" "$CACHE/allow" && return 0
-    who="$(touching_now "$p" | awk -F"$TAB" '{printf "%s@%s(%s) ", (NR>1?", ":""), $1, $2}')"
+    who="$(editing_now "$p" | awk -F"$TAB" '{printf "%s@%s(%s, 작업 트리 %s초 전)", (NR>1?", ":""), $1, $2, $3}')"
     if [ -n "$who" ]; then
-      REASON="차단: $p 는 허브 파일이고 지금 $(printf '%s' "$who" | sed 's/(\([0-9]*\))/ 작업 트리 \1초 전/g')이 만지는 중입니다. 같은 파일을 동시에 고치면 머지 충돌이 납니다.
-멈추고 사용자에게 알리세요. 상대가 끝나길 기다리는 게 원칙입니다. 사용자가 그래도 진행하라고 하면 'scripts/collab.sh guard --allow $p' 후 다시 시도하세요."
+      REASON="차단: $p 는 허브 파일이고 지금 $who 이 편집 중(커밋 전)입니다. 같은 파일을 동시에 고치면 머지 충돌이 납니다.
+멈추고 사용자에게 알리세요. 몇 분 뒤 상대가 커밋하면 풀립니다. 사용자가 그래도 진행하라고 하면 'scripts/collab.sh guard --allow $p' 후 다시 시도하세요."
       return 2
     fi
   fi
@@ -169,7 +190,7 @@ check_write() {
 check_command() {
   cmd="$1"; REASON=""
   case "$cmd" in *scripts/collab.sh*|*harness/init.sh*|*tests/hooks.sh*|*tests/loop.sh*) return 0 ;; esac
-  scrub="$(printf '%s' "$cmd" | sed -e 's/2>&1//g; s/2>>\{0,1\}[^ ]*//g; s/>&[0-9]//g; s/[12]\{0,1\}>>\{0,1\}[[:space:]]*\/dev\/null//g')"
+  scrub="$(printf '%s' "$cmd" | sed -e "s/'[^']*'/''/g" -e 's/"[^"]*"/""/g' -e 's/2>&1//g; s/2>>\{0,1\}[^ ]*//g; s/>&[0-9]//g; s/[12]\{0,1\}>>\{0,1\}[[:space:]]*\/dev\/null//g; s/>>\{0,1\}[[:space:]]*[^ ]*\.log\b//g')"
   printf '%s' "$scrub" | grep -Eq '(^|[^<>|&])>{1,2}[[:space:]]*[^&[:space:]]|(^|[;&|[:space:]])(tee|mv|cp|rm|rmdir|install|truncate|dd|ln)[[:space:]]|(^|[;&|[:space:]])sed[[:space:]]+(-[a-zA-Z]*i|--in-place)|git[[:space:]]+(apply|mv|rm|checkout[[:space:]]+--|restore)|(^|[;&|[:space:]])(python3?|node|perl|ruby)[[:space:]].*(open\(|writeFile|File\.write|>[[:space:]]*[^&])' || return 0
   branch="$(current_branch)" || return 0
   paths="$(printf '%s' "$scrub" | tr ' ;|&()<>"'"'"'`' '\n' | grep -E '^[A-Za-z0-9_./~-]+$' | grep -v '^-' | grep -v '^[0-9.]*$' | sort -u)"

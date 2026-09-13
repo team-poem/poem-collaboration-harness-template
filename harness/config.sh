@@ -25,9 +25,10 @@ WIP_STALE_SEC=7200
 
 # main 이 바뀌고 내 작업 트리가 깨끗하면 pulse 가 자동으로 따라잡는다. 충돌 시 즉시 abort 하고 알린다.
 AUTO_REBASE=true
-# 따라잡는 방식: auto | rebase | merge. auto = 이 브랜치에 sobaya 승인 상태(.git/sobaya/state.json)가 있으면 merge, 없으면 rebase.
-# (sobaya 의 승인 기준은 커밋 sha 라서 rebase 하면 깨진다. merge 는 조상 관계를 유지한다)
-SYNC_MODE=auto
+# 따라잡는 방식: merge | rebase | auto. 기본 merge — 이미 push 한 브랜치를 rebase 하면 다음 push 가 거부되고,
+# sobaya 의 승인 기준(커밋 sha)도 깨진다. GitHub 은 squash 머지만 쓰므로 브랜치 안의 merge 커밋은 main 에 남지 않는다.
+# auto = sobaya 승인 상태가 있으면 merge, 없으면 rebase.
+SYNC_MODE=merge
 
 # 개발 하네스 sobaya 의 워크스페이스 루트. 비우면 이 리포의 두 단계 위(sobaya/apps/<이 리포>)를 본다.
 SOBAYA_ROOT=""

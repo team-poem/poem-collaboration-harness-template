@@ -22,7 +22,7 @@ case "$event" in
     app=""
     if [ "$tool" = "Bash" ]; then
       cmd="$(jget .tool_input.command)"
-      for t in $(printf '%s' "$cmd" | tr ' ;|&()<>"'"'"'`' '\n' | grep -E '^(\./)?apps/[^/]+/' | sed -E 's#^(\./)?(apps/[^/]+)/.*#\2#' | sort -u | head -n1); do app="$WS/$t"; done
+      for t in $(printf '%s' "$cmd" | tr ' ;|&()<>"'"'"'`' '\n' | grep -E '^(\./)?apps/[^/]+(/|$)' | sed -E 's#^(\./)?(apps/[^/]+)(/.*)?$#\2#' | sort -u | head -n1); do app="$WS/$t"; done
       [ -z "$app" ] && [ -n "$cwd" ] && app="$(app_of_dir "$(norm "$cwd")")"
     else
       fp="$(jget .tool_input.file_path)"; [ -n "$fp" ] || fp="$(jget .tool_input.notebook_path)"
