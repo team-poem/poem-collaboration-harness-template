@@ -2,6 +2,7 @@
 # sobaya 결합 검증. 가짜 sobaya 워크스페이스(tdd-set/bin/step.sh 만 있는)를 만들고 그 안 apps/x 에 하네스를 둔다.
 # 실제 sobaya 는 부르지 않는다 — 어댑터 라우팅, 경로 판정, merge 모드, plan 보관 규칙만 본다.
 set -u
+unset GITHUB_HEAD_REF
 SRC="$(cd "$(dirname "$0")/.." && pwd -P)"
 R="$(mktemp -d)"; R="$(cd "$R" && pwd -P)"; trap 'rm -rf "$R"' EXIT
 pass=0; fail=0; check() { if eval "$2"; then pass=$((pass+1)); echo "ok   $1"; else fail=$((fail+1)); echo "FAIL $1"; fi; }

@@ -1,6 +1,7 @@
 #!/bin/sh
 # 협업 루프 검증. bare 원격에 클론 둘(solp, amazon)을 붙여 동시에 작업할 때 실제로 서로를 보는지 확인한다.
 set -u
+unset GITHUB_HEAD_REF
 SRC="$(cd "$(dirname "$0")/.." && pwd -P)"
 R="$(mktemp -d)"; R="$(cd "$R" && pwd -P)"; trap 'rm -rf "$R"' EXIT
 pass=0; fail=0; check() { if eval "$2"; then pass=$((pass+1)); echo "ok   $1"; else fail=$((fail+1)); echo "FAIL $1"; fi; }
