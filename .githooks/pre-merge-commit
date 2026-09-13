@@ -1,0 +1,5 @@
+#!/bin/sh
+# 보호 브랜치에서 로컬 머지(git merge feat/x)로 코드를 들이는 것도 pre-commit 과 같은 규칙으로 막는다.
+root="$(git rev-parse --show-toplevel)" || exit 0
+[ -f "$root/scripts/collab.sh" ] && { sh "$root/scripts/collab.sh" precommit || exit 1; }
+exit 0

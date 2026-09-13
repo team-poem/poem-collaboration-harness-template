@@ -33,4 +33,4 @@ jobs:
       - run: |
           git config user.name harness-bot && git config user.email harness-bot@users.noreply.github.com
           sh scripts/collab.sh prune
-          git diff --cached --quiet || { git commit -m "chore(collab): prune claims" && git push; }
+          git diff --cached --quiet || { git commit -m "chore(collab): prune claims" && COLLAB_ALLOW_PROTECTED_PUSH=1 git push; }

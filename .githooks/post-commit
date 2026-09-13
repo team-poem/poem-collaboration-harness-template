@@ -1,0 +1,6 @@
+#!/bin/sh
+# 커밋마다 작업 트리 스냅샷을 올리고 브랜치를 push 한다 (upstream 이 있을 때). sobaya 의 체크포인트 커밋도 여기 걸려
+# 루프가 도는 동안에도 동료가 "지금 만지는 파일" 을 본다. 자동 따라잡기는 하지 않는다 (sobaya 실행 중일 수 있다).
+root="$(git rev-parse --show-toplevel)" || exit 0
+[ -f "$root/scripts/collab.sh" ] && sh "$root/scripts/collab.sh" wip
+exit 0
