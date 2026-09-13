@@ -8,7 +8,7 @@ CLAIM_DIR="collab/active"        # collab/active/<branch-slug>/claim.md + 브랜
 JOURNAL_DIR="collab/journal"     # YYYY-MM-DD-<owner>-<slug>.md, append-only
 
 # 보호 브랜치에서 수정 가능한 경로 (공백 구분)
-PROTECTED_BRANCH_ALLOW="collab/ harness/ .claude/ .github/ scripts/ tests/ CLAUDE.md AGENTS.md README.md CONTRIBUTING.md .gitignore"
+PROTECTED_BRANCH_ALLOW="collab/ harness/ docs/ .claude/ .codex/ .agents/ .githooks/ .github/ scripts/ tests/ CLAUDE.md AGENTS.md README.md CONTRIBUTING.md .gitignore"
 
 # claim 없이도 수정 가능한 경로
 CLAIM_EXEMPT=".claude/settings.local.json"
