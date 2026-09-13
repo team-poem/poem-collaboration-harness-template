@@ -6,12 +6,12 @@ R="$(mktemp -d)"; R="$(cd "$R" && pwd -P)"; trap 'rm -rf "$R"' EXIT
 pass=0; fail=0; check() { if eval "$2"; then pass=$((pass+1)); echo "ok   $1"; else fail=$((fail+1)); echo "FAIL $1"; fi; }
 git init -q --bare "$R/origin.git" && git -C "$R/origin.git" symbolic-ref HEAD refs/heads/main   # 러너의 기본 브랜치가 master 여도 main 으로
 git clone -q "$R/origin.git" "$R/seed" 2>/dev/null; cd "$R/seed" && git switch -qc main 2>/dev/null
-cp -R "$SRC/.claude" "$SRC/harness" "$SRC/collab" "$SRC/scripts" "$SRC/.gitignore" . && rm -rf .claude/cache
+cp -R "$SRC/.claude" "$SRC/.codex" "$SRC/.githooks" "$SRC/harness" "$SRC/collab" "$SRC/scripts" "$SRC/.gitignore" . && rm -rf .claude/cache
 mkdir -p lib/api components/ui app/checkout app/settings prisma && printf 'export function getUser(){}\n' > lib/api/user.ts && echo b > components/ui/button.tsx && echo s > prisma/schema.prisma && echo '{}' > package.json
 git -c user.name=seed -c user.email=s@s add -A && git -c user.name=seed -c user.email=s@s commit -qm init && git push -q origin main
 clone() { git clone -q "$R/origin.git" "$R/$1" && cd "$R/$1" && git config user.name "$1" && git config user.email "$1@t" && git config collab.me "$1"; }
 col() { (cd "$R/$1" && CLAUDE_PROJECT_DIR="$R/$1" sh scripts/collab.sh "$2" ${3:-} ${4:-}); }
-hook() { (cd "$R/$1" && CLAUDE_PROJECT_DIR="$R/$1" sh ".claude/hooks/$2.sh"); }
+hook() { (cd "$R/$1" && CLAUDE_PROJECT_DIR="$R/$1" sh "harness/hooks/$2.sh"); }
 today="$(date +%Y-%m-%d)"
 clone solp >/dev/null; clone amazon >/dev/null
 
@@ -46,9 +46,9 @@ out="$(col solp pulse)"
 check "solp pulse: button.tsx 겹침 감지"      "printf '%s' \"\$out\" | grep -q '겹침: components/ui/button.tsx 를 @amazon'"
 p2="$(col solp pulse)"; check "solp pulse: 두 번째는 조용"            "[ -z \"\$p2\" ]"; [ -n "$p2" ] && printf '%s\n' "$p2" | sed 's/^/     /'
 
-rc="$(cd "$R/solp" && printf '{"tool_name":"Write","tool_input":{"file_path":"%s/package.json"}}' "$R/solp" | CLAUDE_PROJECT_DIR="$R/solp" sh .claude/hooks/guard.sh 2>"$R/err"; echo $?)"
+rc="$(cd "$R/solp" && printf '{"tool_name":"Write","tool_input":{"file_path":"%s/package.json"}}' "$R/solp" | CLAUDE_PROJECT_DIR="$R/solp" sh harness/hooks/guard.sh 2>"$R/err"; echo $?)"
 check "허브 파일(package.json) 은 차단"       "[ \"\$rc\" = 2 ] && grep -q 'amazon' '$R/err'"
-rc="$(cd "$R/solp" && printf '{"tool_name":"Write","tool_input":{"file_path":"%s/components/ui/button.tsx"}}' "$R/solp" | CLAUDE_PROJECT_DIR="$R/solp" sh .claude/hooks/guard.sh 2>/dev/null; echo $?)"
+rc="$(cd "$R/solp" && printf '{"tool_name":"Write","tool_input":{"file_path":"%s/components/ui/button.tsx"}}' "$R/solp" | CLAUDE_PROJECT_DIR="$R/solp" sh harness/hooks/guard.sh 2>/dev/null; echo $?)"
 check "허브 아닌 겹침 파일은 통과"            "[ \"\$rc\" = 0 ]"
 check "digest 에 '같은 파일을 만지는 중'"     "col solp digest | grep -q 'components/ui/button.tsx ← @amazon'"
 

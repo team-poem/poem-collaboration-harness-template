@@ -3,7 +3,7 @@
 set -u
 SRC="$(cd "$(dirname "$0")/.." && pwd -P)"
 T="$(mktemp -d)"; T="$(cd "$T" && pwd -P)"; W="$(mktemp -d)"; trap 'rm -rf "$T" "$W"' EXIT
-cp -R "$SRC/.claude" "$SRC/harness" "$SRC/collab" "$SRC/scripts" "$SRC/.gitignore" "$T"/; rm -rf "$T/.claude/cache"
+cp -R "$SRC/.claude" "$SRC/.codex" "$SRC/.githooks" "$SRC/harness" "$SRC/collab" "$SRC/scripts" "$SRC/.gitignore" "$T"/; rm -rf "$T/.claude/cache"
 cd "$T" && git init -q -b main && git config user.email t@t && git config user.name t && git config collab.me me
 mkdir -p src/auth src/pay collab/journal prisma && echo x > src/auth/a.ts && echo y > src/pay/p.ts && echo s > prisma/schema.prisma && echo '{}' > package.json
 echo j > collab/journal/2026-01-01-minsu-old.md
@@ -11,7 +11,7 @@ git add -A && git commit -qm init
 git switch -qc feat/pay && mkdir -p collab/active/feat--pay
 printf -- '---\nbranch: feat/pay\nowner: minsu\nstarted: 2026-01-01\nstatus: active\ngoal: pay\n---\n' > collab/active/feat--pay/claim.md
 git add -A && git commit -qm claim && git switch -q main
-export CLAUDE_PROJECT_DIR="$T"; H="$T/.claude/hooks"; pass=0; fail=0
+export CLAUDE_PROJECT_DIR="$T"; H="$T/harness/hooks"; pass=0; fail=0
 call() { printf '{"tool_name":"Write","tool_input":{"file_path":"%s/%s"}}' "$T" "$2" | sh "$H/$1.sh" 2>"$W/err" >"$W/out"; echo $?; }
 bash_call() { printf '{"tool_name":"Bash","tool_input":{"command":%s}}' "$(printf '%s' "$1" | jq -Rs .)" | sh "$H/guard.sh" 2>"$W/err" >"$W/out"; echo $?; }
 expect() { got="$(call "$2" "$3")"; if [ "$got" = "$4" ]; then pass=$((pass+1)); echo "ok   $1"; else fail=$((fail+1)); echo "FAIL $1 (exit $got, expected $4)"; sed 's/^/     /' "$W/err"; fi; }
@@ -68,7 +68,7 @@ rm -f .claude/cache/wip.tsv .claude/cache/allow
 
 echo "# 루트 탐색"
 mkdir -p "$W/ws/apps" && cp -R "$T" "$W/ws/apps/x" && rm -rf "$W/ws/apps/x/.claude/cache"
-got="$(cd "$W/ws" && CLAUDE_PROJECT_DIR="$W/ws" sh "$W/ws/apps/x/.claude/hooks/guard.sh" 2>/dev/null <<EOF2
+got="$(cd "$W/ws" && CLAUDE_PROJECT_DIR="$W/ws" sh "$W/ws/apps/x/harness/hooks/guard.sh" 2>/dev/null <<EOF2
 {"tool_name":"Write","tool_input":{"file_path":"$W/ws/apps/x/collab/journal/2026-01-01-minsu-old.md"}}
 EOF2
 echo $?)"
@@ -80,6 +80,41 @@ check "changed + 경로"   "[ \"\$(printf -- '- changed lib/api/user.ts getUser 
 check "ask @핸들 (경로 없음)" "[ \"\$(printf -- '- ask @me 웹훅이 토큰 읽나?' | sed 's/^[[:space:]]*-[[:space:]]*//' | awk '{t=\$1; p=\"-\"; s=2; if (\$2 ~ /[\\/.]/ && \$2 !~ /^@/) { p=\$2; s=3 }; txt=\"\"; for (i=s;i<=NF;i++) txt=txt (i>s?\" \":\"\") \$i; printf \"%s|%s|%s\", t, p, txt}')\" = 'ask|-|@me 웹훅이 토큰 읽나?' ]"
 check "md_section"       "[ \"\$(printf '## 이벤트\n- a\n\n- b\n## 남은 것\n- c\n' > '$W/m.md'; md_section '$W/m.md' 이벤트 | tr '\n' ' ')\" = '- a - b ' ]"
 check "wip_snapshot 이 미추적 파일 포함"  "echo new > src/auth/untracked.ts; sha=\$(wip_snapshot); git ls-tree -r --name-only \$sha | grep -q src/auth/untracked.ts && ! git log --oneline | grep -q wip"
+
+echo "# 설정 일관성: Claude 와 Codex 가 같은 훅 스크립트를 가리키는가"
+c1="$(jq -r '.hooks|to_entries[]|.key+" "+(.value[]|.hooks[]|.command|sub("^\"\\$CLAUDE_PROJECT_DIR\"/";""))' "$SRC/.claude/settings.json" | sort)"
+c2="$(jq -r '.hooks|to_entries[]|.key+" "+(.value[]|.hooks[]|.command)' "$SRC/.codex/hooks.json" | sort)"
+check "settings.json ≡ .codex/hooks.json"   "[ \"\$c1\" = \"\$c2\" ] && [ -n \"\$c1\" ]"
+check "가리키는 스크립트가 모두 존재·실행 가능" "for s in \$(printf '%s\n' \"\$c2\" | awk '{print \$2}' | sort -u); do [ -x \"\$SRC/\$s\" ] || exit 1; done"
+check ".claude/skills → .agents/skills 심링크" "[ -L '$SRC/.claude/skills' ] && [ -f '$SRC/.claude/skills/start-work/SKILL.md' ]"
+check "CLAUDE.md → AGENTS.md 심링크"          "[ -L '$SRC/CLAUDE.md' ] && [ ! -L '$SRC/AGENTS.md' ]"
+
+echo "# git 훅 (도구 무관): pre-commit 이 guard 와 같은 규칙"
+git config core.hooksPath .githooks
+git switch -q main
+echo hack > src/auth/a.ts; git add src/auth/a.ts
+check "main: 코드 커밋 차단"                  "! git commit -qm x 2>/dev/null"
+git reset -q HEAD src/auth/a.ts; git checkout -q src/auth/a.ts
+echo note >> collab/journal/README.md; git add collab/journal/README.md
+check "main: collab/ 커밋 허용"                "git commit -qm note 2>/dev/null"
+git switch -qc feat/hook
+echo x > src/auth/h.ts; git add src/auth/h.ts
+check "claim 없음: 커밋 차단"                  "! git commit -qm x 2>/dev/null"
+mkdir -p collab/active/feat--hook && printf -- '---\nbranch: feat/hook\nowner: me\nstatus: active\ngoal: h\n---\n' > collab/active/feat--hook/claim.md && git add collab/active/feat--hook
+check "claim 과 함께면 커밋 허용"               "git commit -qm claim 2>/dev/null"
+echo edit >> collab/journal/2026-01-01-minsu-old.md; git add collab/journal/2026-01-01-minsu-old.md
+check "기존 저널 수정 커밋 차단"               "! git commit -qm x 2>/dev/null"
+git reset -q HEAD collab/journal/2026-01-01-minsu-old.md && git checkout -q collab/journal/2026-01-01-minsu-old.md
+echo z >> collab/active/feat--pay/claim.md; git add collab/active/feat--pay/claim.md
+check "남의 claim 수정 커밋 차단"              "! git commit -qm x 2>/dev/null"
+git reset -q HEAD collab/active/feat--pay/claim.md && git checkout -q collab/active/feat--pay/claim.md
+printf 'minsu\t60\tpackage.json\n' > .claude/cache/wip.tsv; echo '{"a":1}' > package.json; git add package.json
+check "pre-commit 은 wip 허브 차단을 안 함 (커밋 시점엔 늦음)" "git commit -qm pkg 2>/dev/null"
+rm -f .claude/cache/wip.tsv
+printf '#!/bin/sh\necho SOBAYA_HOOK_RAN >> "$(git rev-parse --show-toplevel)/.sobaya-ran"\n' > .git/hooks/pre-commit; chmod +x .git/hooks/pre-commit
+echo y > src/auth/y.ts; git add src/auth/y.ts; git commit -qm y 2>/dev/null
+check "sobaya 앱 pre-commit 을 이어서 실행"     "[ -f .sobaya-ran ]"
+rm -f .git/hooks/pre-commit .sobaya-ran; git config --unset core.hooksPath; git switch -q feat/login
 
 echo "# check"
 echo z > src/auth/b.ts; printf '# j\n\n## 이벤트\n- changed src/auth/a.ts x\n\n## 남은 것\n- y\n' > collab/journal/2026-01-02-me-feat--login.md

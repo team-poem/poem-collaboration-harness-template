@@ -13,16 +13,16 @@ echo '# Sobaya' > AGENTS.md; git add -A && git commit -qm init
 # bare 원격 + 앱
 git init -q --bare "$R/origin.git" && git -C "$R/origin.git" symbolic-ref HEAD refs/heads/main
 A="$WS/apps/shop"; git clone -q "$R/origin.git" "$A" 2>/dev/null; cd "$A" && git switch -qc main 2>/dev/null && git config user.email a@a && git config user.name a && git config collab.me solp
-cp -R "$SRC/.claude" "$SRC/harness" "$SRC/collab" "$SRC/scripts" "$SRC/.gitignore" "$SRC/AGENTS.md" . && rm -rf .claude/cache && ln -s AGENTS.md CLAUDE.md
+cp -R "$SRC/.claude" "$SRC/.codex" "$SRC/.githooks" "$SRC/harness" "$SRC/collab" "$SRC/scripts" "$SRC/.gitignore" "$SRC/AGENTS.md" . && rm -rf .claude/cache && ln -s AGENTS.md CLAUDE.md
 mkdir -p src && echo a > src/a.ts && echo '{}' > package.json && git add -A && git commit -qm init && git push -q origin main
 git switch -qc feat/x && mkdir -p collab/active/feat--x && printf -- '---\nbranch: feat/x\nowner: solp\nstarted: %s\nstatus: active\ngoal: x\n---\n' "$today" > collab/active/feat--x/claim.md && git add -A && git commit -qm claim && git push -q -u origin HEAD
 export CLAUDE_PROJECT_DIR="$A"
 
 echo "# 앱 안에서: 경로가 훅 cwd 기준으로 해석되는가"
-rc="$(printf '{"tool_name":"Bash","tool_input":{"command":"echo x > src/new.ts"},"cwd":"%s"}' "$A" | sh .claude/hooks/guard.sh 2>/dev/null; echo $?)"
+rc="$(printf '{"tool_name":"Bash","tool_input":{"command":"echo x > src/new.ts"},"cwd":"%s"}' "$A" | sh harness/hooks/guard.sh 2>/dev/null; echo $?)"
 check "claim 있는 브랜치: 상대경로 쓰기 통과"  "[ \"\$rc\" = 0 ]"
 git switch -q main
-rc="$(printf '{"tool_name":"Bash","tool_input":{"command":"echo x > src/new.ts"},"cwd":"%s"}' "$A" | sh .claude/hooks/guard.sh 2>/dev/null; echo $?)"
+rc="$(printf '{"tool_name":"Bash","tool_input":{"command":"echo x > src/new.ts"},"cwd":"%s"}' "$A" | sh harness/hooks/guard.sh 2>/dev/null; echo $?)"
 check "main: 상대경로 쓰기 차단"                "[ \"\$rc\" = 2 ]"
 
 echo "# sobaya 루트에서 세션을 열었을 때 (어댑터)"
@@ -55,7 +55,7 @@ git -C "$WS" commit -q --allow-empty -m bump
 check "digest: sobaya 가 lock 과 다르면 sync 권유"         "sh scripts/collab.sh digest | grep -q 'attach-sobaya.sh sync'"
 
 echo "# merge 모드"
-. "$A/.claude/hooks/lib.sh"
+. "$A/harness/hooks/lib.sh"
 check "승인 상태 없음 → rebase"                           "[ \"\$(sync_mode)\" = rebase ]"
 mkdir -p "$(git rev-parse --absolute-git-dir)/sobaya" && echo '{"baseline":"x"}' > "$(git rev-parse --absolute-git-dir)/sobaya/state.json"
 check "승인 상태 있음 → merge"                            "[ \"\$(sync_mode)\" = merge ]"
@@ -69,7 +69,7 @@ echo s > spec.md && echo f > failed-test.md && printf '# j\n\n## 이벤트\n- do
 check "check: 루트 spec.md/failed-test.md 가 PR 에 있으면 실패" "! sh scripts/collab.sh check --base origin/main > '$R/chk' 2>&1 && grep -q 'plan 보관' '$R/chk'"
 mkdir -p "collab/journal/plans/$today-solp-feat--x" && git mv spec.md failed-test.md "collab/journal/plans/$today-solp-feat--x/" && git commit -qm archive
 check "check: plans/ 로 옮기면 통과 (plans 는 저널 entry 로 안 침)" "sh scripts/collab.sh check --base origin/main > '$R/chk' 2>&1"
-rc="$(printf '{"tool_name":"Write","tool_input":{"file_path":"%s/collab/journal/plans/%s-solp-feat--x/spec.md"}}' "$A" "$today" | sh .claude/hooks/guard.sh 2>/dev/null; echo $?)"
+rc="$(printf '{"tool_name":"Write","tool_input":{"file_path":"%s/collab/journal/plans/%s-solp-feat--x/spec.md"}}' "$A" "$today" | sh harness/hooks/guard.sh 2>/dev/null; echo $?)"
 check "보관된 plan 은 append-only 로 보호"                  "[ \"\$rc\" = 2 ]"
 
 echo "# attach-sobaya.sh check (실제 sobaya 없이 되는 부분)"
