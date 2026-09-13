@@ -22,3 +22,8 @@ Claude Code 는 부모 디렉토리의 `CLAUDE.md` 를 읽지만 `AGENTS.md` 는
 
 ## 5. `install.sh` 가 앱 `AGENTS.md` 가 심링크면 명확히 알려주기
 협업 하네스 0.0.1 은 `AGENTS.md` 가 심링크였고 `_contract_text` 가 "Cannot read regular file" 로 거부했다. 0.0.2 에서 방향을 바꿔 해결했지만, `install.sh` 단계에서 "AGENTS.md 는 실제 파일이어야 한다" 고 말해주면 다음 사람이 덜 헤맨다.
+
+## 6. `install.sh` 가 `core.hooksPath` 훅과 공존
+협업 하네스는 `.githooks/pre-commit` 을 `core.hooksPath` 로 켜고, 그 안에서 sobaya 의 앱 pre-commit(`.git/hooks/pre-commit`)을 이어서 실행한다.
+그런데 `install.sh` 는 `core.hooksPath` 가 잡혀 있으면 "existing pre-commit hook preserved" 로 중단한다. 협업 하네스는 install 동안 hooksPath 를 잠깐 풀었다 되돌리는 식으로 우회한다.
+`--chain` 옵션이나 "hooksPath 훅이 sobaya 훅을 exec 하면 통과" 규칙이 있으면 우회가 사라진다.

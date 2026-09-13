@@ -4,6 +4,8 @@
 
 ## 처음 한 번
 - 클론 후 `git config collab.me <핸들>` (공백·하이픈 없이). 저널 파일명과 `@멘션` 에 쓰인다.
+- `git config core.hooksPath .githooks`. 커밋·push 검사가 도구와 무관하게 걸린다 (init.sh 를 돌린 사람은 이미 돼 있다).
+- Claude Code 든 Codex 든 같다. 훅이 없는 도구면 세션 시작에 `sh scripts/collab.sh digest --fetch` 를 직접 친다.
 - `git config rerere.enabled true` (init.sh 가 해준다). 같은 충돌을 두 번 풀지 않는다.
 
 ## 브랜치

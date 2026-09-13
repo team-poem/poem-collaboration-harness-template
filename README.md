@@ -105,13 +105,13 @@ $ git config collab.me amazon && git config rerere.enabled true
 $ claude
 [훅 SessionStart] git fetch → 동료 브랜치·저널·wip 를 읽어 주입. 아직 아무것도 없다.
   # 협업 현황 · 나: @solp · 브랜치: main
-  ## 내 claim        - 보호 브랜치. 코드 수정은 차단됩니다. 작업 시작은 Skill(start-work).
+  ## 내 claim        - 보호 브랜치. 코드 수정은 차단됩니다. 작업 시작은 start-work 스킬.
   ## 동료 작업 중    - 없음
 
 solp: "상품 목록 페이지랑 상품 API 만들어줘. Product 모델도."
 
 Claude 가 app/products/page.tsx 를 쓰려 한다
-[훅 PreToolUse guard] 차단: 보호 브랜치(main)에서는 코드를 수정하지 않습니다. Skill(start-work) 로 …
+[훅 PreToolUse guard] 차단: 보호 브랜치(main)에서는 코드를 수정하지 않습니다. start-work 스킬 로 …
 Claude → start-work:
   git switch -c feat/products origin/main
   collab/active/feat--products/claim.md   ← goal: 상품 목록 페이지 + 상품 API + Product 모델
@@ -188,7 +188,7 @@ Claude 가 lib/api/cart.ts 에서 getProduct(id) 를 import 해서 사용, app/a
 
 amazon: "오늘은 여기까지"
 Claude 가 끝내려 한다
-[훅 Stop] 코드 변경이 있는데 오늘 내 저널이 없습니다. Skill(handoff) 로 … → Claude 가 멈추지 않고 handoff 를 한다
+[훅 Stop] 코드 변경이 있는데 오늘 내 저널이 없습니다. handoff 스킬 로 … → Claude 가 멈추지 않고 handoff 를 한다
 Claude → handoff:
   collab/journal/2026-09-03-amazon-feat--cart.md
     ## 이벤트
@@ -327,22 +327,36 @@ collab/
   active/<slug>/          claim.md + 브랜치 산출물 (failed-test.md, spec.md …)
   journal/                YYYY-MM-DD-<owner>-<slug>.md · 이벤트 로그 · append-only
   templates/              claim / journal
-.claude/
-  settings.json           훅 배선 (팀 공유). 개인 조정은 settings.local.json
-  hooks/                  guard · session-start · post-edit · stop · lib
-  skills/                 start-work · handoff
+.agents/skills/           start-work · handoff (.claude/skills 는 심링크)
+.claude/settings.json     Claude Code 훅 배선 → harness/hooks
+.codex/hooks.json         Codex 훅 배선 → 같은 harness/hooks
+.githooks/                pre-commit(guard 와 같은 판정) · pre-push(저널 경고). 도구 무관
 harness/
+  hooks/                  guard · session-start · post-edit · stop · lib — 모든 판정의 본체
   config.sh               보호 브랜치, HOTSPOTS, pulse 주기, AUTO_REBASE, SYNC_MODE
   attach-sobaya.sh        sobaya 붙이기 · sync · update · check
   sobaya/                 루트 세션용 훅 어댑터, sobaya 에 보내는 제안
   sobaya.lock             (attach 후) 팀이 검증한 sobaya 커밋
   init.sh · VERSION · CHANGELOG.md
-scripts/collab.sh         digest · pulse · guard · check · prune
+scripts/collab.sh         digest · pulse · guard · check · prune · precommit · prepush
 tests/hooks.sh            훅 단위 검증
 tests/loop.sh             클론 둘이 동시에 작업하며 실제로 서로를 보는지 검증
 tests/sobaya.sh           sobaya 루트 세션 어댑터, merge 모드, plan 규칙 검증
 .github/                  PR 템플릿, CI (테스트 · check · main 에서 prune · 주간 sobaya upstream 확인)
 ```
+
+## Claude 든 Codex 든 같게 도는 이유
+
+규칙은 세 겹인데, 아래 두 겹은 도구와 무관하다.
+
+| 겹 | 어디서 | 누구에게 |
+|---|---|---|
+| **에디터 훅** | `.claude/settings.json`, `.codex/hooks.json` → 둘 다 `harness/hooks/*.sh` | Claude Code, Codex. 파일을 고치는 순간 막거나 알린다 |
+| **git 훅** | `.githooks/pre-commit`, `pre-push` (`init.sh` 가 `core.hooksPath` 로 켠다) | 무엇으로 커밋하든. 스테이지된 파일에 guard 와 같은 판정 |
+| **CI** | PR 마다 `collab.sh check` | 최종 방어선 |
+
+계약은 `AGENTS.md` 하나(`CLAUDE.md` 는 심링크), 스킬은 `.agents/skills/` 하나(`.claude/skills` 는 심링크), 현황·판정은 `scripts/collab.sh` 하나다.
+훅이 안 붙는 도구에서는 `collab.sh digest` 와 `pulse` 를 직접 부르면 같은 정보를 본다. `AGENTS.md` 가 그렇게 시킨다.
 
 ## 개발 하네스 sobaya 와 함께 쓰기
 
@@ -368,8 +382,8 @@ sh harness/attach-sobaya.sh attach --test "npm test"
 git add AGENTS.md spec.md failed-test.md harness/sobaya.lock && git commit -m "chore: attach sobaya" && git push
 ```
 
-세션은 앱 안(`apps/shop`)에서 열어도 되고 sobaya 루트에서 열어도 된다.
-루트에서는 `attach` 가 `~/sobaya/.claude/settings.local.json` 에 놓은 어댑터가 훅 입력을 보고 대상 앱을 찾아 그 앱의 협업 훅을 대신 부른다. sobaya 리포에는 아무것도 커밋되지 않는다.
+세션은 앱 안(`apps/shop`)에서 여는 게 기본이다. 앱의 `.claude/settings.json` 과 `.codex/hooks.json` 이 그대로 붙는다.
+Claude 로 sobaya 루트에서 열면 `attach` 가 `~/sobaya/.claude/settings.local.json` 에 놓은 어댑터가 대상 앱을 찾아 그 앱의 훅을 대신 부른다. Codex 는 루트 훅 파일이 sobaya 리포에 추적되므로 앱 안에서 연다. 어느 쪽이든 커밋은 git 훅이 검사한다.
 
 ### 하루가 어떻게 달라지나
 
