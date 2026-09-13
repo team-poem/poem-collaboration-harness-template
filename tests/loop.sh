@@ -52,6 +52,23 @@ rc="$(cd "$R/solp" && printf '{"tool_name":"Write","tool_input":{"file_path":"%s
 check "허브 아닌 겹침 파일은 통과"            "[ \"\$rc\" = 0 ]"
 check "digest 에 '같은 파일을 만지는 중'"     "col solp digest | grep -q 'components/ui/button.tsx ← @amazon'"
 
+echo "# 열린 PR 에 추가 커밋한 뒤 같은 파일을 다시 편집하면"
+edit_notice() { printf '{"tool_name":"Edit","tool_input":{"file_path":"%s/components/ui/button.tsx"}}' "$R/solp" | hook solp post-edit; }
+out="$(edit_notice)"
+check "수정 훅: 브랜치와 숫자 나이를 편집 상태로 표시" "printf '%s' \"\$out\" | grep -Eq '@amazon\\(feat--settings, 작업 트리 [0-9]+초 전\\).*편집 중'"
+cd "$R/amazon" && git config core.hooksPath .githooks && git add -A && git commit -qm "PR 추가 커밋"
+git config --unset core.hooksPath
+out="$(col solp pulse)"
+check "추가 커밋 뒤 편집 겹침이 미머지 겹침으로 바뀜" "printf '%s' \"\$out\" | grep -q '겹침(커밋됨): components/ui/button.tsx'"
+check "상대가 커밋한 허브 파일은 차단 해제" "col solp guard package.json"
+out="$(edit_notice)"
+check "수정 훅: 커밋된 변경을 다시 편집 중이라고 말하지 않음" "printf '%s' \"\$out\" | grep -q '커밋됨(미머지)' && ! printf '%s' \"\$out\" | grep -q '편집 중'"
+cd "$R/amazon" && echo 'size again' >> components/ui/button.tsx && col amazon pulse >/dev/null
+out="$(col solp pulse)"
+check "동일 PR 에서 다시 편집하면 겹침을 다시 알림" "printf '%s' \"\$out\" | grep -q '겹침: components/ui/button.tsx 를 @amazon'"
+out="$(col solp pulse)"
+check "재편집도 같은 상태가 지속되는 동안은 조용" "[ -z \"\$out\" ]"
+
 echo "# reply 로 ask 가 사라지는가"
 cd "$R/solp" && printf '# feat/checkout · solp\n\n## 이벤트\n- reply @amazon 웹훅은 토큰을 읽지 않음\n- touching components/ui/button.tsx loading prop 추가 중\n\n## 남은 것\n- 결제 확인 화면\n' > "collab/journal/$today-solp-feat--checkout.md"
 check "reply 후 ask 사라짐"                   "! col solp digest | grep -q '@solp 결제 웹훅'"

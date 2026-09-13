@@ -152,14 +152,16 @@ pulse)
   [ -f "$OVPREV" ] || : > "$OVPREV"
   wip_push; do_fetch 5 || { now_epoch > "$CACHE/pulse.at"; exit 0; }
   out=""; wip_table; MYF="$(my_files)"
-  # 새 겹침 (파일 단위)
+  # 직전 pulse 와 비교한다. 사라졌다 다시 생긴 편집 겹침은 새 알림이다.
+  ovnext="$OVPREV.next"; : > "$ovnext"
   new=""; [ -f "$CACHE/wip.tsv" ] && while IFS="$TAB" read -r o slug age unc com; do
-    for f in $unc; do [ "$f" = "-" ] && continue; printf '%s\n' "$MYF" | grep -qx "$f" || continue; grep -qxF "$f@$o/$slug" "$OVPREV" && continue
-      echo "$f@$o/$slug" >> "$OVPREV"; new="$new
+    for f in $unc; do [ "$f" = "-" ] && continue; printf '%s\n' "$MYF" | grep -qx "$f" || continue
+      echo "$f@$o/$slug" >> "$ovnext"; grep -qxF "$f@$o/$slug" "$OVPREV" && continue; new="$new
 - 겹침: $f 를 @$o($slug) 도 지금 편집 중 ($(fmt_age "$age"))$( is_hotspot "$f" && echo ' · 허브 파일이라 이제부터 차단됨')"; done
-    for f in $com; do [ "$f" = "-" ] && continue; printf '%s\n' "$MYF" | grep -qx "$f" || continue; grep -qxF "$f@$o/$slug:c" "$OVPREV" && continue
-      echo "$f@$o/$slug:c" >> "$OVPREV"; new="$new
+    for f in $com; do [ "$f" = "-" ] && continue; printf '%s\n' "$MYF" | grep -qx "$f" || continue
+      echo "$f@$o/$slug:c" >> "$ovnext"; grep -qxF "$f@$o/$slug:c" "$OVPREV" && continue; new="$new
 - 겹침(커밋됨): $f 를 @$o($slug) 브랜치가 이미 바꿨습니다. 머지 때 만납니다 — 공유 파일이면 작은 선행 PR 을 제안하세요"; done; done < "$CACHE/wip.tsv"
+  mv "$ovnext" "$OVPREV"
   [ -n "$new" ] && out="$out$new"
   # 새 이벤트·질문 (digest 와 같은 필터, seen 제외)
   ev="$(sh "$0" digest --json 2>/dev/null)"
