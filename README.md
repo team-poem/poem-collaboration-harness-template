@@ -321,7 +321,7 @@ claude          # 협업 현황이 먼저 뜬다. 첫 작업은 start-work
 ## 구조
 
 ```
-CLAUDE.md (= AGENTS.md)   에이전트 계약 (40줄)
+AGENTS.md (= CLAUDE.md)   에이전트 계약 + sobaya 가 읽는 App facts. CLAUDE.md 는 심링크
 CONTRIBUTING.md           사람이 지키는 것
 collab/
   active/<slug>/          claim.md + 브랜치 산출물 (failed-test.md, spec.md …)
@@ -332,18 +332,71 @@ collab/
   hooks/                  guard · session-start · post-edit · stop · lib
   skills/                 start-work · handoff
 harness/
-  config.sh               보호 브랜치, HOTSPOTS, pulse 주기, AUTO_REBASE
+  config.sh               보호 브랜치, HOTSPOTS, pulse 주기, AUTO_REBASE, SYNC_MODE
+  attach-sobaya.sh        sobaya 붙이기 · sync · update · check
+  sobaya/                 루트 세션용 훅 어댑터, sobaya 에 보내는 제안
+  sobaya.lock             (attach 후) 팀이 검증한 sobaya 커밋
   init.sh · VERSION · CHANGELOG.md
 scripts/collab.sh         digest · pulse · guard · check · prune
 tests/hooks.sh            훅 단위 검증
 tests/loop.sh             클론 둘이 동시에 작업하며 실제로 서로를 보는지 검증
-.github/                  PR 템플릿, CI (테스트 · check · main 에서 prune)
+tests/sobaya.sh           sobaya 루트 세션 어댑터, merge 모드, plan 규칙 검증
+.github/                  PR 템플릿, CI (테스트 · check · main 에서 prune · 주간 sobaya upstream 확인)
 ```
 
-## 나중에 붙는 것들과 만나는 자리
+## 개발 하네스 sobaya 와 함께 쓰기
 
-- **개발 하네스 (sobaya, TDD 루프)**: 브랜치에 묶인 산출물(`failed-test.md`, spec)은 `collab/active/<slug>/` 에. 브랜치를 넘는 지식은 그쪽 brain 에. 저널에는 지식을 쓰지 않는다. 같은 판정을 쓰려면 `scripts/collab.sh guard <path>`, 현황을 가져가려면 `digest --json`. 워크스페이스 루트에서 앱 파일을 건드려도 파일 위치로 그 앱의 collab 을 찾는다.
-- **CI 아우터 루프**: `check` 가 "다른 열린 브랜치와 같은 파일" 을 알려준다. 지금은 먼저 머지되는 쪽이 이기고 나중 쪽이 rebase 한다. 자동 병합 순서는 그때 `digest --json` 을 입력으로.
+실제 구현은 [team-poem/sobaya](https://github.com/team-poem/sobaya) 가 한다. 사람이 승인한 실패 테스트를 하나씩 넣고, 워커가 구현하고, 하네스가 검증해서 커밋하는 루프다.
+협업 하네스는 그 바깥에서 "누가 무엇을 하고 있고 무엇을 바꿨나" 를 관리한다. 둘은 이렇게 겹쳐진다.
+
+```
+~/sobaya/                      ← 각자의 sobaya 워크스페이스 (team-poem/sobaya 클론). brain, tdd-set, 스킬
+  apps/
+    shop/                      ← 팀 프로젝트 (이 템플릿으로 만든 리포). collab/, 훅, 저널
+      AGENTS.md                ← 두 하네스가 같이 읽는 앱 계약. '- Test:' 는 sobaya 가, 나머지는 협업 규칙
+      spec.md, failed-test.md  ← 브랜치(기능) 단위. main 에는 없다
+      collab/active/<slug>/    ← claim. 브랜치 산출물도 여기
+      harness/sobaya.lock      ← 팀이 검증한 sobaya 커밋
+```
+
+### 붙이기
+
+```sh
+cd ~/sobaya && git clone git@github.com:team-poem/shop apps/shop && cd apps/shop
+sh harness/attach-sobaya.sh attach --test "npm test"
+#  → AGENTS.md 의 - Test: 채움, sobaya 의 install.sh(spec.md·failed-test.md·pre-commit), 루트 세션용 훅 어댑터, harness/sobaya.lock
+git add AGENTS.md spec.md failed-test.md harness/sobaya.lock && git commit -m "chore: attach sobaya" && git push
+```
+
+세션은 앱 안(`apps/shop`)에서 열어도 되고 sobaya 루트에서 열어도 된다.
+루트에서는 `attach` 가 `~/sobaya/.claude/settings.local.json` 에 놓은 어댑터가 훅 입력을 보고 대상 앱을 찾아 그 앱의 협업 훅을 대신 부른다. sobaya 리포에는 아무것도 커밋되지 않는다.
+
+### 하루가 어떻게 달라지나
+
+- `start-work` 가 브랜치와 claim 을 만든 뒤 `install.sh` 로 이 브랜치의 `spec.md`·`failed-test.md` 를 만든다. 사람이 spec 과 실패 테스트를 승인하면 `step.sh`/`loop.sh` 가 구현한다.
+- 구현 중에도 협업 훅은 그대로 돈다. 워커가 고친 파일도 pulse 의 작업 트리 스냅샷에 들어가서 동료에게 "지금 만지는 파일" 로 보인다.
+- sobaya 의 승인 기준은 커밋 sha 라서 rebase 하면 깨진다. 그래서 승인 상태가 있는 브랜치는 pulse 가 main 을 **merge** 로 따라잡는다 (자동 판별).
+- PR 전에 `handoff` 가 `spec.md`·`failed-test.md` 를 `collab/journal/plans/<날짜-owner-slug>/` 로 옮긴다. main 에 plan 이 남으면 다음 사람의 브랜치와 같은 경로에서 충돌하고 승인이 깨지기 때문이다. `check` 가 이걸 막는다.
+
+### sobaya 가 업데이트되면
+
+sobaya 는 각자의 워크스페이스에 있으니 "우리 쪽 sobaya" 는 곧 각자의 클론이다. 팀이 같은 버전을 쓰게 하는 건 `harness/sobaya.lock` 하나다.
+
+| 언제 | 누가 | 무엇 |
+|---|---|---|
+| upstream 에 새 커밋 | CI (매주 월요일, 또는 수동) | lock 보다 앞서면 "sobaya 업데이트 있음" 이슈를 열고 비교 링크를 붙인다 |
+| 올리기로 함 | 아무나 한 명 | `sh harness/attach-sobaya.sh update` → 클론 pull, 앱 계약 재설치, lock 갱신 → 커밋·push |
+| 다음 세션 | 나머지 | digest 가 "내 sobaya 가 팀 검증 버전과 다릅니다" → `sh harness/attach-sobaya.sh sync` |
+
+`check` 로 언제든 클론·lock·upstream 세 버전을 볼 수 있다.
+
+### sobaya 쪽에 바라는 것
+
+지금은 협업 하네스가 우회해 둔 것들이다. `harness/sobaya/PROPOSAL.md` 에 적어 뒀다. 요지는 승인 기준을 커밋 sha 대신 내용 해시로, plan 경로를 앱 계약에서 지정할 수 있게, 루트에 `CLAUDE.md` 심링크. 받아주면 merge 강제와 plan 이동이 사라진다.
+
+## CI 아우터 루프와의 자리
+
+`check` 가 "다른 열린 브랜치와 같은 파일" 을 알려준다. 지금은 먼저 머지되는 쪽이 이기고 나중 쪽이 따라잡는다. 자동 병합 순서는 그때 `digest --json` 을 입력으로.
 
 ## 자주 겪을 것
 

@@ -24,6 +24,11 @@
 - 에이전트가 diff 의 의미 있는 부분을 썼으면 커밋에 `Assisted-by: <모델명>`.
 - 결과는 사람이 소유한다. 설명 못 하는 줄은 지운다.
 
+## sobaya 와 함께 쓸 때
+- 이 리포는 각자의 sobaya 워크스페이스 안 `apps/<이름>` 에 클론한다. 처음 한 번 `sh harness/attach-sobaya.sh attach`.
+- sobaya 가 업데이트되면: 아무나 `sh harness/attach-sobaya.sh update` → `harness/sobaya.lock` 커밋 → 나머지는 세션 시작 때 digest 가 "다르다" 고 하면 `sync`. 매주 CI 가 upstream 이 앞서면 이슈를 연다.
+- `spec.md`·`failed-test.md` 는 브랜치 단위. PR 전에 handoff 가 `collab/journal/plans/` 로 옮긴다. main 에 남기지 않는다.
+
 ## 하네스를 고칠 때
 - 훅을 고치면 `tests/hooks.sh` 와 `tests/loop.sh`. 새 규칙엔 테스트를 붙인다.
 - `harness/VERSION` 을 올리고 `harness/CHANGELOG.md` 에 한 줄.

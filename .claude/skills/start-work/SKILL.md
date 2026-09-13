@@ -16,6 +16,10 @@ description: 작업 브랜치를 만들고 claim(무엇을 만드는지)을 써�
    git add collab/active/<slug> && git commit -m "chore(collab): claim <branch>" && git push -u origin HEAD
    ```
 
+## sobaya 로 구현할 브랜치라면 (harness/sobaya.lock 이 있으면 기본)
+5. `bash <sobaya>/tdd-set/bin/install.sh .` (앱 안에서) 또는 `tdd-set/bin/install.sh apps/<이름>` (루트에서) — 이 브랜치의 `spec.md`, `failed-test.md` 가 없으면 만든다. main 에는 없으므로 새 브랜치마다 새로 생긴다.
+6. 사용자와 spec.md 와 실패 테스트 초안을 채우고, 사용자가 승인하면 `approve.sh`. 이후 구현은 `step.sh`/`loop.sh` 가 한다. 이 파일들은 sobaya 가 보호하므로 에이전트가 직접 고치지 않는다.
+
 ## 이어받기 (남의 브랜치에서 계속할 때)
 1. 그 브랜치로 switch. digest 가 "owner 가 @X" 라고 알려준다.
 2. 그 브랜치의 최근 저널 `## 남은 것` 을 읽고 사용자에게 요약한다.

@@ -15,9 +15,12 @@ description: 세션을 마무리한다. 저널에 이벤트(동료 에이전트�
      - 커밋 로그를 옮겨 적지 않는다. "무엇을 했다" 가 아니라 "상대가 무엇을 해야 하나" 가 기준.
    - `## 남은 것`: 이어받는 사람용. 막힌 곳, 실패한 시도.
 2. **claim.** `status` 갱신: 계속하면 `active`, 한동안 안 하면 `paused`, PR 올리면 `done`.
-3. **검사.** `scripts/collab.sh check`. 위반이 있으면 고친다. "다른 열린 브랜치와 같은 파일" 이 나오면 사용자에게 알린다.
-4. **커밋·push.** `git add collab/ && git commit -m "chore(collab): handoff <branch>" && git push`. PR 을 올릴 때는 `.github/PULL_REQUEST_TEMPLATE.md`.
-5. 사용자에게 세 줄: 한 것, 남은 것, 동료가 알아야 할 것.
+3. **sobaya plan 보관** (루트에 `spec.md`·`failed-test.md` 가 있고 PR 을 올릴 때만). 먼저 `gate.sh` 와 `review.sh` 가 끝났는지 `status.sh` 로 확인한다.
+   그 다음 `mkdir -p collab/journal/plans/YYYY-MM-DD-<나>-<slug> && git mv spec.md failed-test.md collab/journal/plans/YYYY-MM-DD-<나>-<slug>/`.
+   이유: 두 브랜치의 plan 이 같은 루트 경로에 있으면 머지에서 충돌하고, 상대의 sobaya 승인 기준이 깨진다. main 에는 plan 파일을 두지 않는다. `check` 가 이걸 확인한다.
+4. **검사.** `scripts/collab.sh check`. 위반이 있으면 고친다. "다른 열린 브랜치와 같은 파일" 이 나오면 사용자에게 알린다.
+5. **커밋·push.** `git add collab/ && git commit -m "chore(collab): handoff <branch>" && git push`. PR 을 올릴 때는 `.github/PULL_REQUEST_TEMPLATE.md`.
+6. 사용자에게 세 줄: 한 것, 남은 것, 동료가 알아야 할 것.
 
 ## 커밋 트레일러
 에이전트가 diff 의 의미 있는 부분을 썼으면 커밋 끝에 `Assisted-by: <모델명>`.
