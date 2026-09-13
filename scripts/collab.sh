@@ -1,6 +1,7 @@
 #!/bin/sh
 # 협업 하네스 도구. 훅과 같은 lib.sh 를 쓴다. 사람도, 훅도, 다른 하네스도, CI 도 이것만 부른다.
 #
+#   state                       온보딩 상태: setup(프로젝트 초기화 필요) | join(합류: 개인 설정만) | ready. 감지 정보도 함께
 #   digest [--fetch] [--json]   협업 현황. 세션 시작 훅이 주입하는 것과 동일. 내 시점으로 좁혀서
 #   pulse                       내 작업 트리 스냅샷 올리기 + 원격 당겨오기. 새 겹침·새 이벤트·main 변경(자동 rebase)만 출력
 #   guard <path> | --allow <path>   쓰기 판정(exit 2 = 차단). --allow 는 이 세션에서 그 경로의 허브 차단을 해제
@@ -61,6 +62,20 @@ jarr() { first=1; printf '['; while IFS= read -r x; do [ -z "$x" ] && continue; 
 
 cmd="${1:-}"; [ $# -gt 0 ] && shift
 case "$cmd" in
+
+state)
+  # 리터럴을 쪼개 둔다 — init.sh 의 치환이 이 코드까지 바꾸면 안 되니까
+  ob='{'; cb='}'; ph=0; grep -q "$ob${ob}PROJECT_NAME$cb$cb\|$ob${ob}OWNER$cb$cb" AGENTS.md 2>/dev/null && ph=1
+  handle="$(g config collab.me 2>/dev/null || true)"; hooks="$( [ "$(g config core.hooksPath 2>/dev/null)" = .githooks ] && echo on || echo off)"
+  remote="$(g remote get-url origin 2>/dev/null || true)"; sr="$(sobaya_root 2>/dev/null || true)"; lk="$(sobaya_lock)"
+  ghok="$(command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1 && echo yes || echo no)"
+  testcmd="$(sed -n 's/^- Test:[[:space:]]*//p' AGENTS.md 2>/dev/null | head -n1)"
+  if [ "$(g config collab.onboarded 2>/dev/null)" = true ]; then st=ready
+  elif [ $ph = 1 ]; then st=setup
+  elif [ -z "$handle" ] || [ "$hooks" = off ] || { [ -n "$lk" ] && [ -n "$sr" ] && [ "$(git -C "$sr" rev-parse HEAD 2>/dev/null)" != "$lk" ]; }; then st=join
+  else st=ready; fi
+  printf 'state=%s\nrepo=%s\nremote=%s\nplaceholders=%s\nhandle=%s\nhooks=%s\nsobaya=%s\nsobaya_lock=%s\ngh=%s\ntest=%s\n' \
+    "$st" "$(basename "$ROOT")" "${remote:--}" "$ph" "${handle:--}" "$hooks" "${sr:--}" "${lk:--}" "$ghok" "${testcmd:--}" ;;
 
 digest)
   fetch_note=""; json=0; for a in "$@"; do case "$a" in --fetch) do_fetch 8 && fetch_note="원격 갱신됨" || fetch_note="원격 갱신 실패 — 동료 상태가 오래됐을 수 있음" ;; --json) json=1 ;; esac; done

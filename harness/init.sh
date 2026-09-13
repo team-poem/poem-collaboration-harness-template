@@ -7,7 +7,7 @@ name="${1:-}"; owner="${2:-}"
 [ -z "$owner" ] && { owner="$(git config user.name 2>/dev/null | tr ' -' '__' || true)"; printf '내 핸들 (공백·하이픈 없이) [%s]: ' "$owner"; read -r o; [ -n "$o" ] && owner="$o"; }
 owner="$(printf '%s' "$owner" | tr ' -' '__')"; date="$(date +%Y-%m-%d)"
 grep -rl --exclude-dir=.git --exclude-dir=node_modules -e '{{PROJECT_NAME}}' -e '{{OWNER}}' -e '{{DATE}}' . 2>/dev/null \
-  | grep -v '^./collab/templates/' | grep -v '^./harness/init.sh$' | while read -r f; do
+  | grep -v '^./collab/templates/' | grep -v '^./harness/init.sh$' | grep -v '^./scripts/' | grep -v '^./harness/hooks/' | grep -v '^./tests/' | while read -r f; do
   sed -i.bak -e "s/{{PROJECT_NAME}}/$name/g" -e "s/{{OWNER}}/$owner/g" -e "s/{{DATE}}/$date/g" "$f" && rm -f "$f.bak"; done
 chmod +x harness/hooks/*.sh harness/*.sh .githooks/* scripts/*.sh tests/*.sh 2>/dev/null || true
 git config core.hooksPath .githooks   # 어느 도구로 커밋하든 같은 규칙
@@ -28,5 +28,5 @@ cat <<MSG
   1. harness/config.sh 의 HOTSPOTS 를 이 프로젝트의 허브 파일로 맞춘다 (스키마, lockfile, 배럴, i18n …)
      AGENTS.md 의 '- Test:' 에 실제 테스트 명령을 적는다 (sobaya 를 쓰면 attach-sobaya.sh 가 물어본다)
   2. git add -A && git commit -m "chore: init collaboration harness" && git push
-  3. claude 를 켜면 협업 현황이 먼저 뜬다. 첫 작업은 Skill(start-work)
+  3. claude 를 켜면 협업 현황이 먼저 뜬다. 첫 작업은 start-work 스킬
 MSG
