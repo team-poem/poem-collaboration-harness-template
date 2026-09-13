@@ -46,7 +46,7 @@ scripts/collab.sh         유일한 CLI. 훅·git 훅·CI·다른 하네스가 �
 .codex/hooks.json         Codex 훅 배선 → 같은 harness/hooks
 .githooks/                pre-commit(guard 와 같은 판정) · pre-push(저널 경고). core.hooksPath 로 켬. 도구 무관
 .github/                  PR 템플릿 · CI (tests · check · main 에서 prune · 주간 sobaya upstream 확인)
-tests/                    hooks.sh(51) · loop.sh(19, 클론 둘) · sobaya.sh(19)
+tests/                    hooks.sh · loop.sh(클론 둘) · sobaya.sh(개발 루프 상태 모의)
 docs/guide.md             사람용 안내
 ```
 
@@ -56,7 +56,7 @@ docs/guide.md             사람용 안내
 |---|---|---|
 | `state` | session-start 훅 | 온보딩 판정 `setup`/`join`/`ready` 와 감지 정보(핸들, 훅, sobaya, gh, 테스트 명령) |
 | `digest [--fetch] [--json]` | session-start 훅, 사람, 다른 하네스 | 나에게 온 질문 · 영향 있는 이벤트 · 동료 작업 중 · 같은 파일 만지는 중 · sobaya 버전. `--json` 은 아우터 루프 입력 |
-| `pulse` | post-edit 훅 | wip push → fetch → 새 겹침·새 이벤트 알림 → main 뒤처졌으면 따라잡기(rebase, sobaya 승인 브랜치는 merge). 깨끗한 트리에서만, 충돌이면 abort |
+| `pulse` | post-edit 훅 | wip push → fetch → 새 겹침·새 이벤트 알림 → main 뒤처졌으면 따라잡기(기본 merge). sobaya 항목 진행 중엔 보류하고, 깨끗한 트리에서만 실행. 충돌이면 abort |
 | `guard <path>` / `guard --allow <path>` | guard 훅과 같은 판정을 CLI 로 | exit 2 = 차단. `--allow` 는 이 세션에서 허브 차단 해제 |
 | `check [--base REF]` | handoff, CI | PR 규칙: claim 형식, 저널 존재와 필수 절, append-only, 남의 claim, 루트 plan 파일, 다른 브랜치와 겹친 파일(정보) |
 | `wip` | `.githooks/post-commit` | 커밋마다 작업 트리 스냅샷 push + 브랜치 push(upstream 있으면) + 겹침 경고. sobaya 체크포인트 커밋도 여기 걸린다 |
@@ -104,7 +104,8 @@ goal: 결제 페이지
 | `ask @핸들` | 나를 불렀으면 항상, `reply @상대` 가 내 저널에 생길 때까지 |
 | `done` `reply` | 주입 안 함 (기록용) |
 
-주입된 이벤트는 clone 별 `.claude/cache/seen` 에 기록돼 다시 뜨지 않는다. `ask` 만 예외.
+주입된 이벤트는 브랜치별 `.claude/cache/seen.<slug>` 에 기록돼 다시 뜨지 않는다. `ask` 만 예외.
+겹침 알림은 현재 상태와 직전 상태를 비교한다. 같은 PR 에서 커밋한 뒤 다시 편집하면 새 겹침으로 알리며, 수정 직후 알림도 편집 중과 커밋됨(미머지)을 구분한다.
 
 ## 흐름
 
@@ -117,6 +118,7 @@ start-work ──▶ (작업 · pulse · 커밋마다 wip) ──▶ handoff ─
 
 - **start-work**: 보호 브랜치면 `git switch -c <type>/<slug> origin/main`. `collab/active/<slug>/claim.md` 작성, 첫 커밋으로 push. sobaya 를 쓰면 `install.sh` 로 이 브랜치의 `spec.md`·`failed-test.md` 생성.
 - **중간**: 알림에 반응. 허브 파일 차단이면 사용자에게 알린다. 결정은 저널 `rule` 이벤트로.
+- **main 따라잡기 보류 후**: sobaya 작업이 끝나도 미커밋 파일이 남으면 커밋 안내를 새로 보낸다. 커밋 후 다음 pulse 는 main 에 새 push 가 없어도 따라잡기를 재개한다. 충돌 시 원래 작업 상태로 되돌리고 알린다.
 - **handoff**: 저널(이벤트 + 남은 것) → claim status → (sobaya) `gate`·`review` 후 plan 을 `collab/journal/plans/` 로 이동 → `check` → push.
 - **이어받기**: 남의 브랜치에서 digest 가 "owner 가 @X" 라고 알림 → 최근 저널 `남은 것` 읽고 owner 교체 → 첫 저널에 `reply @X`.
 

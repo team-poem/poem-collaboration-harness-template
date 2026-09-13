@@ -73,18 +73,20 @@ echo "# reply 로 ask 가 사라지는가"
 cd "$R/solp" && printf '# feat/checkout · solp\n\n## 이벤트\n- reply @amazon 웹훅은 토큰을 읽지 않음\n- touching components/ui/button.tsx loading prop 추가 중\n\n## 남은 것\n- 결제 확인 화면\n' > "collab/journal/$today-solp-feat--checkout.md"
 check "reply 후 ask 사라짐"                   "! col solp digest | grep -q '@solp 결제 웹훅'"
 
-echo "# main 변경 → 자동 rebase"
+echo "# main 변경 → 자동 merge 와 충돌 복구"
 cd "$R/amazon" && git stash -q && git switch -q main && echo 'export const X = 1' > lib/api/consts.ts && git add -A && git commit -qm "main change" && git push -q origin main && git switch -q feat/settings && git stash pop -q
 cd "$R/solp" && git add -A && git commit -qm "solp work" >/dev/null
 out="$(col solp pulse)"
 check "깨끗한 트리: 자동 merge (기본)"        "printf '%s' \"\$out\" | grep -q '자동으로 merge' && git -C '$R/solp' merge-base --is-ancestor origin/main HEAD"
 cd "$R/amazon" && git add -A && git commit -qm "amazon work" -q && git push -q origin HEAD && git switch -q main && mkdir -p app/checkout && printf 'import { getUser } from \"../../lib/api/user\"\nconflict\n' > app/checkout/page.tsx && git add -A && git commit -qm "main conflict" && git push -q origin main && git switch -q feat/settings
 cd "$R/solp" && echo more >> app/checkout/page.tsx && git add -A && git commit -qm "solp more" -q
+conflict_head="$(git rev-parse HEAD)"; conflict_tree="$(git write-tree)"; conflict_file="$(git hash-object app/checkout/page.tsx)"
 out="$(col solp pulse)"
-check "충돌: abort 하고 알림"                 "printf '%s' \"\$out\" | grep -q 'main 과 충돌: app/checkout/page.tsx' && [ ! -d '$R/solp/.git/rebase-merge' ]"
+check "충돌: abort 하고 알림"                 "printf '%s' \"\$out\" | grep -q 'main 과 충돌: app/checkout/page.tsx' && ! git rev-parse -q --verify MERGE_HEAD >/dev/null"
+check "충돌 복구 후 원래 HEAD·인덱스·파일 내용 보존" "[ \"\$(git rev-parse HEAD)\" = \"\$conflict_head\" ] && [ \"\$(git write-tree)\" = \"\$conflict_tree\" ] && [ \"\$(git hash-object app/checkout/page.tsx)\" = \"\$conflict_file\" ] && [ -z \"\$(git status --porcelain)\" ]"
 cd "$R/solp" && echo dirty > app/checkout/x.ts
 out="$(col solp pulse)"
-check "더러운 트리: rebase 안 하고 안내"       "printf '%s' \"\$out\" | grep -q '커밋한 뒤' || [ -z \"\$out\" ]"
+check "미커밋 파일이 있으면 merge 안 하고 안내" "printf '%s' \"\$out\" | grep -q '커밋한 뒤' && [ \"\$(git rev-parse HEAD)\" = \"\$conflict_head\" ] && [ \"\$(cat app/checkout/x.ts)\" = dirty ]"
 
 echo "# squash 머지 감지와 브랜치별 seen"
 cd "$R/amazon" && git switch -q main && git pull -q --ff-only origin main 2>/dev/null; git merge -q --squash feat/settings >/dev/null 2>&1 && git commit -qm "feat: settings (squash)" && git push -q origin main; git switch -q feat/settings
