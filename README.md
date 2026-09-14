@@ -75,7 +75,7 @@ docs/guide.md             사람용 안내
 | 커밋된 저널 수정 · 남의 claim 수정 | 차단 | 차단 | 실패 |
 | 동료가 지금 **편집 중**(커밋 전)인 허브 파일(HOTSPOTS) | 차단 (`--allow` 로 해제) | 경고 | — |
 | 동료 브랜치에 커밋됐지만 미머지인 파일 · 그 외 겹침 | 알림 (선행 PR 제안) | — | 정보 |
-| 보호 브랜치로 코드 직접 push · 로컬 머지 | — | 차단 (pre-push, pre-merge-commit). 하네스 메타만 바뀐 push 와 첫 publish 는 통과 | — |
+| 보호 브랜치로 코드 직접 push · 로컬 머지 | — | 차단 (pre-push, pre-merge-commit). 하네스 메타만 바뀐 push 와 첫 publish 는 통과 | GitHub 룰셋: PR 필수, 승인 1명, CI 통과, 관리자 포함 |
 | 코드 변경 있는데 저널 없이 종료 | Stop 훅이 1회 세움 | pre-push 경고 | 저널 없으면 실패 |
 | 루트 `spec.md`·`failed-test.md` 가 PR 에 포함 | — | — | 실패 |
 
