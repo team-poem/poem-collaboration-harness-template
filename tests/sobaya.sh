@@ -2,6 +2,7 @@
 # sobaya 결합 검증. 가짜 sobaya 워크스페이스(tdd-set/bin/step.sh 만 있는)를 만들고 그 안 apps/x 에 하네스를 둔다.
 # 실제 sobaya 는 부르지 않는다 — 어댑터 라우팅, 경로 판정, merge 모드, plan 보관 규칙만 본다.
 set -u
+unset GITHUB_HEAD_REF
 SRC="$(cd "$(dirname "$0")/.." && pwd -P)"
 R="$(mktemp -d)"; R="$(cd "$R" && pwd -P)"; trap 'rm -rf "$R"' EXIT
 pass=0; fail=0; check() { if eval "$2"; then pass=$((pass+1)); echo "ok   $1"; else fail=$((fail+1)); echo "FAIL $1"; fi; }
@@ -71,7 +72,19 @@ git switch -q main && echo m2 > src/m2.ts && git add -A && git commit -qm main-c
 echo '{"baseline":"x","active":{"head":"y"}}' > "$(git rev-parse --absolute-git-dir)/sobaya/state.json"
 out="$(sh scripts/collab.sh pulse)"
 check "sobaya 항목 진행 중이면 따라잡기 보류"              "printf '%s' \"\$out\" | grep -q '보류' && ! git merge-base --is-ancestor origin/main HEAD"
+pending_main="$(git rev-parse origin/main)"; pending_head="$(git rev-parse HEAD)"
+out="$(sh scripts/collab.sh pulse)"
+check "같은 항목 진행 중에는 중복 보류 알림과 HEAD 변경 없음" "[ -z \"\$out\" ] && [ \"\$(git rev-parse HEAD)\" = \"\$pending_head\" ]"
 echo '{"baseline":"x","active":null}' > "$(git rev-parse --absolute-git-dir)/sobaya/state.json"
+echo pending > src/pending.ts
+out="$(sh scripts/collab.sh pulse)"
+check "루프 종료 뒤 미커밋 변경이 남으면 다음 행동을 새로 안내" "printf '%s' \"\$out\" | grep -q '커밋한 뒤' && [ \"\$(git rev-parse HEAD)\" = \"\$pending_head\" ] && [ \"\$(cat src/pending.ts)\" = pending ]"
+out="$(sh scripts/collab.sh pulse)"
+check "동일한 미커밋 상태 안내는 반복하지 않음" "[ -z \"\$out\" ]"
+git add src/pending.ts && git commit -qm "보류 중 작업 체크포인트"; checkpoint="$(git rev-parse HEAD)"
+out="$(sh scripts/collab.sh pulse)"
+check "새 main push 없이도 체크포인트 후 자동 merge 재개" "printf '%s' \"\$out\" | grep -q '자동으로 merge' && [ \"\$(git rev-parse origin/main)\" = \"\$pending_main\" ] && git merge-base --is-ancestor \"\$pending_main\" HEAD && git merge-base --is-ancestor \"\$checkpoint\" HEAD"
+check "재개 뒤 기존 승인 상태와 작업 내용 보존" "jq -e '.baseline == \"x\" and .active == null' .git/sobaya/state.json >/dev/null && [ \"\$(cat src/pending.ts)\" = pending ]"
 
 echo "# run 래퍼와 worktree"
 # 동료(amazon)가 package.json 을 편집 중인 실제 wip ref 를 원격에 만든다 (run 은 fetch 후 wip 표를 다시 만들기 때문)

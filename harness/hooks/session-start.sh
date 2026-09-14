@@ -1,7 +1,7 @@
 #!/bin/sh
 # SessionStart: 리포 상태를 보고 온보딩 또는 협업 현황(digest)을 주입한다. 실패해도 세션은 계속된다.
 . "$(dirname "$0")/lib.sh"
-rm -f "$CACHE/edits" "$CACHE/warned" "$CACHE/allow"
+rm -f "$CACHE/edits" "$CACHE/warned" "$(branch_cache warned)" "$CACHE/allow"
 st="$(sh "$ROOT/scripts/collab.sh" state 2>/dev/null)"; mode="$(printf '%s\n' "$st" | sed -n 's/^state=//p')"
 v() { printf '%s\n' "$st" | sed -n "s/^$1=//p"; }
 case "$mode" in

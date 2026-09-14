@@ -1,6 +1,8 @@
 #!/bin/sh
 # 훅 단위 검증. 임시 리포에서 실제 훅을 stdin JSON 으로 호출한다.
 set -u
+# 임시 리포의 브랜치는 바깥 PR 의 브랜치와 다르다. CI 문맥은 해당 검사에서만 주입한다.
+unset GITHUB_HEAD_REF
 SRC="$(cd "$(dirname "$0")/.." && pwd -P)"
 T="$(mktemp -d)"; T="$(cd "$T" && pwd -P)"; W="$(mktemp -d)"; trap 'rm -rf "$T" "$W"' EXIT
 cp -R "$SRC/.claude" "$SRC/.codex" "$SRC/.githooks" "$SRC/harness" "$SRC/collab" "$SRC/scripts" "$SRC/.gitignore" "$T"/; rm -rf "$T/.claude/cache"
@@ -135,9 +137,10 @@ check "claim 과 함께면 커밋 허용"               "git commit -qm claim 2>
 echo edit >> collab/journal/2026-01-01-minsu-old.md; git add collab/journal/2026-01-01-minsu-old.md
 check "기존 저널 수정 커밋 차단"               "! git commit -qm x 2>/dev/null"
 git reset -q HEAD collab/journal/2026-01-01-minsu-old.md && git checkout -q collab/journal/2026-01-01-minsu-old.md
+git checkout feat/pay -- collab/active/feat--pay/claim.md || exit 1
 echo z >> collab/active/feat--pay/claim.md; git add collab/active/feat--pay/claim.md
-check "남의 claim 수정 커밋 차단"              "! git commit -qm x 2>/dev/null"
-git reset -q HEAD collab/active/feat--pay/claim.md && git checkout -q collab/active/feat--pay/claim.md
+check "남의 claim 변경 커밋 차단 (실제 스테이지와 차단 이유 확인)" "! git diff --cached --quiet -- collab/active/feat--pay/claim.md && ! git commit -qm x 2>'$W/err' && grep -q '다른 브랜치의 claim' '$W/err'"
+git reset -q HEAD -- collab/active/feat--pay/claim.md && rm -f collab/active/feat--pay/claim.md
 printf 'minsu\tfeat--pay\t60\tpackage.json\t-\n' > .claude/cache/wip.tsv; date +%s > .claude/cache/pulse.at; echo '{"a":1}' > package.json; git add package.json
 check "pre-commit 은 wip 허브를 차단 안 하고 경고만"    "git commit -qm pkg 2>'$W/err' && grep -q '주의: 허브 파일' '$W/err'"
 rm -f .claude/cache/wip.tsv
@@ -162,12 +165,16 @@ echo z > src/auth/b.ts; printf '# j\n\n## 이벤트\n- changed src/auth/a.ts x\n
 git add -A && git commit -qm work
 check "check 통과"                         "sh scripts/collab.sh check --base main >'$W/chk' 2>&1"
 [ $fail -gt 0 ] && sed 's/^/     /' "$W/chk" | head -12
-check "check: CI(detached HEAD)에서 자기 브랜치를 남으로 안 봄" "git switch -q --detach && GITHUB_HEAD_REF=feat/login sh scripts/collab.sh check --base main 2>&1 | grep -v -q '같은 파일을 바꿈' ; git switch -q feat/login"
+git switch -q --detach
+GITHUB_HEAD_REF=feat/login sh scripts/collab.sh check --base main > "$W/ci-check" 2>&1; ci_rc=$?
+git switch -q feat/login
+# src/auth/b.ts 는 feat/login 에만 있다. 실제 동료 feat/hook 의 겹침(package.json)은 남아야 한다.
+check "check: CI(detached HEAD)에서 자기 브랜치를 남으로 안 봄" "[ \"\$ci_rc\" = 0 ] && ! grep -qF 'src/auth/b.ts(@me)' '$W/ci-check' && grep -qF 'package.json(@me)' '$W/ci-check'"
 printf '# bad\n' > collab/journal/2026-01-02-me-feat--login-2.md; git add -A && git commit -qm bad
 check "check: 이벤트 절 없는 저널 실패"     "! sh scripts/collab.sh check --base main >'$W/chk' 2>&1 && grep -q '절 없음' '$W/chk'"
 git reset -q --hard HEAD~1; echo edit >> collab/journal/2026-01-01-minsu-old.md; git add -A && git commit -qm edit-old
 check "check: 기존 저널 수정 실패"          "! sh scripts/collab.sh check --base main >'$W/chk' 2>&1 && grep -q '기존 저널' '$W/chk'"
 git reset -q --hard HEAD~1
 git switch -q main && git merge -q --no-ff --no-edit feat/login >/dev/null 2>&1
-check "prune: 머지된 claim 삭제"            "sh scripts/collab.sh prune | grep -q '삭제: collab/active/feat--login'"
+check "prune: 머지된 claim 삭제"            "sh scripts/collab.sh prune > '$W/prune' && grep -q '삭제: collab/active/feat--login' '$W/prune'"
 echo; echo "통과 $pass / 실패 $fail"; [ $fail -eq 0 ]

@@ -1,6 +1,7 @@
 #!/bin/sh
 # 협업 루프 검증. bare 원격에 클론 둘(solp, amazon)을 붙여 동시에 작업할 때 실제로 서로를 보는지 확인한다.
 set -u
+unset GITHUB_HEAD_REF
 SRC="$(cd "$(dirname "$0")/.." && pwd -P)"
 R="$(mktemp -d)"; R="$(cd "$R" && pwd -P)"; trap 'rm -rf "$R"' EXIT
 pass=0; fail=0; check() { if eval "$2"; then pass=$((pass+1)); echo "ok   $1"; else fail=$((fail+1)); echo "FAIL $1"; fi; }
@@ -52,22 +53,41 @@ rc="$(cd "$R/solp" && printf '{"tool_name":"Write","tool_input":{"file_path":"%s
 check "허브 아닌 겹침 파일은 통과"            "[ \"\$rc\" = 0 ]"
 check "digest 에 '같은 파일을 만지는 중'"     "col solp digest | grep -q 'components/ui/button.tsx ← @amazon'"
 
+echo "# 열린 PR 에 추가 커밋한 뒤 같은 파일을 다시 편집하면"
+edit_notice() { printf '{"tool_name":"Edit","tool_input":{"file_path":"%s/components/ui/button.tsx"}}' "$R/solp" | hook solp post-edit; }
+out="$(edit_notice)"
+check "수정 훅: 브랜치와 숫자 나이를 편집 상태로 표시" "printf '%s' \"\$out\" | grep -Eq '@amazon\\(feat--settings, 작업 트리 [0-9]+초 전\\).*편집 중'"
+cd "$R/amazon" && git config core.hooksPath .githooks && git add -A && git commit -qm "PR 추가 커밋"
+git config --unset core.hooksPath
+out="$(col solp pulse)"
+check "추가 커밋 뒤 편집 겹침이 미머지 겹침으로 바뀜" "printf '%s' \"\$out\" | grep -q '겹침(커밋됨): components/ui/button.tsx'"
+check "상대가 커밋한 허브 파일은 차단 해제" "col solp guard package.json"
+out="$(edit_notice)"
+check "수정 훅: 커밋된 변경을 다시 편집 중이라고 말하지 않음" "printf '%s' \"\$out\" | grep -q '커밋됨(미머지)' && ! printf '%s' \"\$out\" | grep -q '편집 중'"
+cd "$R/amazon" && echo 'size again' >> components/ui/button.tsx && col amazon pulse >/dev/null
+out="$(col solp pulse)"
+check "동일 PR 에서 다시 편집하면 겹침을 다시 알림" "printf '%s' \"\$out\" | grep -q '겹침: components/ui/button.tsx 를 @amazon'"
+out="$(col solp pulse)"
+check "재편집도 같은 상태가 지속되는 동안은 조용" "[ -z \"\$out\" ]"
+
 echo "# reply 로 ask 가 사라지는가"
 cd "$R/solp" && printf '# feat/checkout · solp\n\n## 이벤트\n- reply @amazon 웹훅은 토큰을 읽지 않음\n- touching components/ui/button.tsx loading prop 추가 중\n\n## 남은 것\n- 결제 확인 화면\n' > "collab/journal/$today-solp-feat--checkout.md"
 check "reply 후 ask 사라짐"                   "! col solp digest | grep -q '@solp 결제 웹훅'"
 
-echo "# main 변경 → 자동 rebase"
+echo "# main 변경 → 자동 merge 와 충돌 복구"
 cd "$R/amazon" && git stash -q && git switch -q main && echo 'export const X = 1' > lib/api/consts.ts && git add -A && git commit -qm "main change" && git push -q origin main && git switch -q feat/settings && git stash pop -q
 cd "$R/solp" && git add -A && git commit -qm "solp work" >/dev/null
 out="$(col solp pulse)"
 check "깨끗한 트리: 자동 merge (기본)"        "printf '%s' \"\$out\" | grep -q '자동으로 merge' && git -C '$R/solp' merge-base --is-ancestor origin/main HEAD"
 cd "$R/amazon" && git add -A && git commit -qm "amazon work" -q && git push -q origin HEAD && git switch -q main && mkdir -p app/checkout && printf 'import { getUser } from \"../../lib/api/user\"\nconflict\n' > app/checkout/page.tsx && git add -A && git commit -qm "main conflict" && git push -q origin main && git switch -q feat/settings
 cd "$R/solp" && echo more >> app/checkout/page.tsx && git add -A && git commit -qm "solp more" -q
+conflict_head="$(git rev-parse HEAD)"; conflict_tree="$(git write-tree)"; conflict_file="$(git hash-object app/checkout/page.tsx)"
 out="$(col solp pulse)"
-check "충돌: abort 하고 알림"                 "printf '%s' \"\$out\" | grep -q 'main 과 충돌: app/checkout/page.tsx' && [ ! -d '$R/solp/.git/rebase-merge' ]"
+check "충돌: abort 하고 알림"                 "printf '%s' \"\$out\" | grep -q 'main 과 충돌: app/checkout/page.tsx' && ! git rev-parse -q --verify MERGE_HEAD >/dev/null"
+check "충돌 복구 후 원래 HEAD·인덱스·파일 내용 보존" "[ \"\$(git rev-parse HEAD)\" = \"\$conflict_head\" ] && [ \"\$(git write-tree)\" = \"\$conflict_tree\" ] && [ \"\$(git hash-object app/checkout/page.tsx)\" = \"\$conflict_file\" ] && [ -z \"\$(git status --porcelain)\" ]"
 cd "$R/solp" && echo dirty > app/checkout/x.ts
 out="$(col solp pulse)"
-check "더러운 트리: rebase 안 하고 안내"       "printf '%s' \"\$out\" | grep -q '커밋한 뒤' || [ -z \"\$out\" ]"
+check "미커밋 파일이 있으면 merge 안 하고 안내" "printf '%s' \"\$out\" | grep -q '커밋한 뒤' && [ \"\$(git rev-parse HEAD)\" = \"\$conflict_head\" ] && [ \"\$(cat app/checkout/x.ts)\" = dirty ]"
 
 echo "# squash 머지 감지와 브랜치별 seen"
 cd "$R/amazon" && git switch -q main && git pull -q --ff-only origin main 2>/dev/null; git merge -q --squash feat/settings >/dev/null 2>&1 && git commit -qm "feat: settings (squash)" && git push -q origin main; git switch -q feat/settings

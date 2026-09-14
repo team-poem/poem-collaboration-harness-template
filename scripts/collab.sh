@@ -28,6 +28,7 @@ unmerged_files() { if [ -n "$MAIN" ]; then g diff --name-only --diff-filter=A "$
 journal_owner() { basename "$1" | sed -E 's/^[0-9]{4}-[0-9]{2}-[0-9]{2}-([^-]+)-.*/\1/'; }
 my_last_journal_date() { ls "$JOURNAL_DIR"/*-"$ME"-*.md 2>/dev/null | sort | tail -n1 | xargs -I{} basename {} | cut -c1-10; }
 SEEN="$(branch_cache seen)"; ASKED="$(branch_cache asked)"; OVPREV="$(branch_cache overlaps.prev)"
+MAIN_NOTIFIED="$(branch_cache main.notified)"
 seen() { [ -f "$SEEN" ] && grep -qxF "$1" "$SEEN"; }
 mark_seen() { echo "$1" >> "$SEEN"; }
 event_id() { printf '%s' "$1" | cksum | cut -d' ' -f1; }
@@ -152,14 +153,16 @@ pulse)
   [ -f "$OVPREV" ] || : > "$OVPREV"
   wip_push; do_fetch 5 || { now_epoch > "$CACHE/pulse.at"; exit 0; }
   out=""; wip_table; MYF="$(my_files)"
-  # 새 겹침 (파일 단위)
+  # 직전 pulse 와 비교한다. 사라졌다 다시 생긴 편집 겹침은 새 알림이다.
+  ovnext="$OVPREV.next"; : > "$ovnext"
   new=""; [ -f "$CACHE/wip.tsv" ] && while IFS="$TAB" read -r o slug age unc com; do
-    for f in $unc; do [ "$f" = "-" ] && continue; printf '%s\n' "$MYF" | grep -qx "$f" || continue; grep -qxF "$f@$o/$slug" "$OVPREV" && continue
-      echo "$f@$o/$slug" >> "$OVPREV"; new="$new
+    for f in $unc; do [ "$f" = "-" ] && continue; printf '%s\n' "$MYF" | grep -qx "$f" || continue
+      echo "$f@$o/$slug" >> "$ovnext"; grep -qxF "$f@$o/$slug" "$OVPREV" && continue; new="$new
 - 겹침: $f 를 @$o($slug) 도 지금 편집 중 ($(fmt_age "$age"))$( is_hotspot "$f" && echo ' · 허브 파일이라 이제부터 차단됨')"; done
-    for f in $com; do [ "$f" = "-" ] && continue; printf '%s\n' "$MYF" | grep -qx "$f" || continue; grep -qxF "$f@$o/$slug:c" "$OVPREV" && continue
-      echo "$f@$o/$slug:c" >> "$OVPREV"; new="$new
+    for f in $com; do [ "$f" = "-" ] && continue; printf '%s\n' "$MYF" | grep -qx "$f" || continue
+      echo "$f@$o/$slug:c" >> "$ovnext"; grep -qxF "$f@$o/$slug:c" "$OVPREV" && continue; new="$new
 - 겹침(커밋됨): $f 를 @$o($slug) 브랜치가 이미 바꿨습니다. 머지 때 만납니다 — 공유 파일이면 작은 선행 PR 을 제안하세요"; done; done < "$CACHE/wip.tsv"
+  mv "$ovnext" "$OVPREV"
   [ -n "$new" ] && out="$out$new"
   # 새 이벤트·질문 (digest 와 같은 필터, seen 제외)
   ev="$(sh "$0" digest --json 2>/dev/null)"
@@ -178,17 +181,17 @@ $e"; sh "$0" digest >/dev/null 2>&1; fi   # 텍스트 digest 를 한 번 돌려 
       mb="$(g merge-base HEAD "$newmain" 2>/dev/null)"; printf '%s\n' "$MYF" > "$CACHE/_myf"
       hit="$(g diff --name-only "$mb" "$newmain" 2>/dev/null | grep -Fx -f "$CACHE/_myf" 2>/dev/null | tr '\n' ' ')"; rm -f "$CACHE/_myf"
       mode="$(sync_mode)"
-      if sobaya_busy; then [ "$(cat "$CACHE/main.notified" 2>/dev/null)" != "$newmain" ] && { echo "$newmain" > "$CACHE/main.notified"; out="$out
+      if sobaya_busy; then [ "$(cat "$MAIN_NOTIFIED" 2>/dev/null)" != "$newmain:busy" ] && { echo "$newmain:busy" > "$MAIN_NOTIFIED"; out="$out
 - main 이 갱신됐지만 sobaya 가 항목을 진행 중이라 따라잡기를 보류합니다.${hit:+ 내 파일과 겹침: $hit.} 루프가 끝나면 다음 pulse 가 합니다."; }
       elif [ "$AUTO_REBASE" = true ] && tree_clean; then
         if [ "$mode" = merge ]; then ok_sync() { g merge -q --no-edit "$MAIN" >/dev/null 2>&1; }; undo_sync() { g merge --abort >/dev/null 2>&1; }
         else ok_sync() { g rebase -q --autostash "$MAIN" >/dev/null 2>&1; }; undo_sync() { g rebase --abort >/dev/null 2>&1; }; fi
-        if ok_sync; then out="$out
-- main 이 갱신되어 자동으로 $mode 했습니다.${hit:+ 내 파일과 겹친 변경: $hit — 다시 확인하세요.}$( [ "$mode" = merge ] && echo ' (sobaya 승인 브랜치라 rebase 대신 merge)')"
+        if ok_sync; then rm -f "$MAIN_NOTIFIED"; out="$out
+- main 이 갱신되어 자동으로 $mode 했습니다.${hit:+ 내 파일과 겹친 변경: $hit — 다시 확인하세요.}"
         else files="$(g diff --name-only --diff-filter=U 2>/dev/null | tr '\n' ' ')"; undo_sync
           out="$out
 - main 과 충돌: $files. 자동 $mode 를 되돌렸습니다. 사용자에게 알리고, 상대 저널의 이벤트를 참고해 'git $mode $MAIN' 으로 직접 해결하세요."; fi
-      elif [ "$(cat "$CACHE/main.notified" 2>/dev/null)" != "$newmain" ]; then echo "$newmain" > "$CACHE/main.notified"
+      elif [ "$(cat "$MAIN_NOTIFIED" 2>/dev/null)" != "$newmain:pending" ]; then echo "$newmain:pending" > "$MAIN_NOTIFIED"
         out="$out
 - main 이 갱신됐습니다.${hit:+ 내 파일과 겹침: $hit.} 커밋한 뒤 'git $mode $MAIN' 하세요 (작업 트리가 깨끗하면 다음 pulse 가 자동으로 합니다)."; fi
     fi

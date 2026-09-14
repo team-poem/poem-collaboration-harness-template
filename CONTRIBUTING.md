@@ -36,5 +36,5 @@
 - `spec.md`·`failed-test.md` 는 브랜치 단위. PR 전에 handoff 가 `collab/journal/plans/` 로 옮긴다. main 에 남기지 않는다.
 
 ## 하네스를 고칠 때
-- 훅을 고치면 `tests/hooks.sh` 와 `tests/loop.sh`. 새 규칙엔 테스트를 붙인다.
+- 훅을 고치면 `sh tests/hooks.sh`, `sh tests/loop.sh`, `sh tests/sobaya.sh`. 새 규칙엔 테스트를 붙인다.
 - `harness/VERSION` 을 올리고 `harness/CHANGELOG.md` 에 한 줄.
