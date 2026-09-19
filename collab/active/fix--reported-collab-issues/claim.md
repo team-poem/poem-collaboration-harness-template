@@ -2,7 +2,7 @@
 branch: fix/reported-collab-issues
 owner: solp
 started: 2026-09-19
-status: active
+status: done
 goal: cairn-landing 실전에서 보고된 협업 하네스 문제 9건을 고친다
 ---
 
