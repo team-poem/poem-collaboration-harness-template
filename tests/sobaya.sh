@@ -48,6 +48,7 @@ check "loop.sh apps/shop (슬래시 없음) 도 앱으로 라우팅 → post-edi
 cd "$A" && echo n > src/n.ts
 out="$(printf '{"hook_event_name":"Stop","stop_hook_active":false,"cwd":"%s"}' "$WS" | disp)"
 check "Stop: 앱에 저널 없으면 block 전달"                 "printf '%s' \"\$out\" | grep -q '\"decision\":\"block\"'"
+[ $fail -gt 0 ] && { echo "     진단: out=[$out]"; (cd "$A" && echo "     branch=$(git rev-parse --abbrev-ref HEAD) status=[$(git status --porcelain | tr '\n' ' ' | cut -c1-80)] journals=[$(ls collab/journal/*.md 2>/dev/null | tr '\n' ' ')] direct=[$(printf '{"stop_hook_active":false}' | CLAUDE_PROJECT_DIR="$A" sh harness/hooks/stop.sh)]"); }
 rm -f src/n.ts
 
 echo "# sobaya 감지와 lock"
