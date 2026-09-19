@@ -148,7 +148,8 @@ git switch -q feat/checkout
 echo "# check 와 stop"
 cd "$R/solp" && git switch -q feat/checkout && rm -f app/checkout/x.ts
 check "check: 다른 열린 브랜치와 같은 파일 알림" "col solp check | grep -q 'button.tsx(@amazon)' || col solp check | grep -q 'user.ts(@amazon)'"
-cd "$R/solp" && rm "collab/journal/$today-solp-feat--checkout.md" && git add -A && git commit -qm rmj -q && echo n > app/checkout/n.tsx
+cd "$R/solp" && rm -f "collab/journal/$today-solp-"*.md && git add -A && { git commit -qm rmj || true; } && echo n > app/checkout/n.tsx
 out="$(printf '{"stop_hook_active":false}' | hook solp stop)"
 check "stop: 변경 있고 저널 없음 → block"     "printf '%s' \"\$out\" | grep -q '\"decision\":\"block\"'"
+[ $fail -gt 0 ] && { echo "     진단: branch=$(git rev-parse --abbrev-ref HEAD) 오늘저널=[$(ls collab/journal/$today-solp-*.md 2>/dev/null | tr '\n' ' ')] my_files=[$( . harness/hooks/lib.sh; my_files | tr '\n' ' ' | cut -c1-120)] out=[$out]"; }
 echo; echo "통과 $pass / 실패 $fail"; [ $fail -eq 0 ]
