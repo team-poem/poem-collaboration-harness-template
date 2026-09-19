@@ -6,7 +6,11 @@ unset GITHUB_HEAD_REF
 SRC="$(cd "$(dirname "$0")/.." && pwd -P)"
 T="$(mktemp -d)"; T="$(cd "$T" && pwd -P)"; W="$(mktemp -d)"; trap 'rm -rf "$T" "$W"' EXIT
 cp -R "$SRC/.claude" "$SRC/.codex" "$SRC/.githooks" "$SRC/harness" "$SRC/collab" "$SRC/scripts" "$SRC/.gitignore" "$T"/; rm -rf "$T/.claude/cache"
-cd "$T" && git init -q -b main && git config user.email t@t && git config user.name t && git config collab.me me
+cd "$T"
+# 픽스처는 템플릿 자신의 협업 데이터를 물려받지 않는다 (오늘 날짜의 실제 저널이 검사에 섞인다)
+find collab/journal -maxdepth 1 -name '*.md' ! -name README.md -delete 2>/dev/null || true
+rm -rf collab/journal/plans; find collab/active -mindepth 1 -maxdepth 1 -type d -exec rm -rf {} + 2>/dev/null || true
+git init -q -b main && git config user.email t@t && git config user.name t && git config collab.me me
 mkdir -p src/auth src/pay collab/journal prisma && echo x > src/auth/a.ts && echo y > src/pay/p.ts && echo s > prisma/schema.prisma && echo '{}' > package.json
 echo j > collab/journal/2026-01-01-minsu-old.md
 git add -A && git commit -qm init

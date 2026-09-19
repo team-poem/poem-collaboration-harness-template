@@ -8,6 +8,10 @@ pass=0; fail=0; check() { if eval "$2"; then pass=$((pass+1)); echo "ok   $1"; e
 git init -q --bare "$R/origin.git" && git -C "$R/origin.git" symbolic-ref HEAD refs/heads/main   # 러너의 기본 브랜치가 master 여도 main 으로
 git clone -q "$R/origin.git" "$R/seed" 2>/dev/null; cd "$R/seed" && git switch -qc main 2>/dev/null
 cp -R "$SRC/.claude" "$SRC/.codex" "$SRC/.githooks" "$SRC/harness" "$SRC/collab" "$SRC/scripts" "$SRC/.gitignore" . && rm -rf .claude/cache
+# 픽스처는 템플릿 자신의 협업 데이터를 물려받지 않는다 (오늘 날짜의 실제 저널이 검사에 섞인다)
+find collab/journal -maxdepth 1 -name '*.md' ! -name README.md -delete 2>/dev/null || true
+rm -rf collab/journal/plans; find collab/active -mindepth 1 -maxdepth 1 -type d -exec rm -rf {} + 2>/dev/null || true
+
 mkdir -p lib/api components/ui app/checkout app/settings prisma && printf 'export function getUser(){}\n' > lib/api/user.ts && echo b > components/ui/button.tsx && echo s > prisma/schema.prisma && echo '{}' > package.json
 git -c user.name=seed -c user.email=s@s add -A && git -c user.name=seed -c user.email=s@s commit -qm init && git push -q origin main
 clone() { git clone -q "$R/origin.git" "$R/$1" && cd "$R/$1" && git config user.name "$1" && git config user.email "$1@t" && git config collab.me "$1"; }
