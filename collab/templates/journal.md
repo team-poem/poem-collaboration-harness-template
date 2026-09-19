@@ -4,7 +4,8 @@
 ## 이벤트
 <!-- 동료의 에이전트가 읽는다. 한 줄 = 한 사건. 형식: - <type> <경로?> <무엇이 바뀌었나> → <상대가 할 일>
      type: changed(시그니처·동작 변경) added(새 공용 것, 중복 만들지 말 것) removed migrated(스키마·데이터)
-           dep(의존성) rule(앞으로 지킬 규칙) touching(지금 만지는 중, 며칠) done(끝남, 자유롭게) ask @핸들(질문) reply @핸들(답) -->
+           dep(의존성) rule(앞으로 지킬 규칙) touching(지금 만지는 중, 며칠) done(끝남, 자유롭게) ask @핸들(질문) reply @핸들(답)
+           supersedes <경로|앞 이벤트의 첫 낱말>(내 앞 이벤트를 무효로 — 저널은 못 고치니 이걸로 정정한다. digest 가 낡은 줄을 숨긴다) -->
 - changed lib/api/user.ts getUser 가 id 를 받게 됨 → 호출부는 id 를 넘길 것
 - added components/ui/Toast.tsx 공용 토스트 → 새로 만들지 말고 이걸 쓸 것
 

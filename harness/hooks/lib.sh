@@ -75,6 +75,21 @@ branch_slug() { printf '%s' "$1" | sed 's#/#--#g'; }
 claim_dir_for() { printf '%s/%s' "$CLAIM_DIR" "$(branch_slug "$1")"; }
 claim_path_for() { printf '%s/claim.md' "$(claim_dir_for "$1")"; }
 tree_clean() { [ -z "$(g status --porcelain 2>/dev/null)" ]; }
+# 통합 작업(머지·체리픽·되돌리기) 중인가 — 그때 들어오는 파일은 "내가 쓴 것" 이 아니다
+integrating() { d="$(g rev-parse --absolute-git-dir 2>/dev/null)" || return 1
+  [ -f "$d/MERGE_HEAD" ] || [ -f "$d/CHERRY_PICK_HEAD" ] || [ -f "$d/REVERT_HEAD" ]; }
+# 이 브랜치가 이미 머지됐는가. gh 가 있으면 PR 상태, 없으면 원격 브랜치의 내용이 main 에 들어갔는지로 본다.
+# squash 머지 직후 origin/<branch> 는 아직 머지된 상태 그대로라 로컬에 새 커밋을 얹어도 잡힌다.
+branch_merged_reason() {
+  b="${1:-$(current_branch)}"; [ -n "$b" ] || return 1; is_protected_branch "$b" && return 1
+  if command -v gh >/dev/null 2>&1; then
+    st="$(cd "$ROOT" && gh pr view "$b" --json state,number --jq '"\(.state) #\(.number)"' 2>/dev/null)" || st=""
+    case "$st" in MERGED*) printf 'PR %s 이 이미 머지됨' "${st#MERGED }"; return 0 ;; esac
+  fi
+  r="refs/remotes/origin/$b"; g show-ref --verify --quiet "$r" || return 1
+  ref_merged "$r" || return 1
+  printf 'origin/%s 의 변경이 이미 %s 에 들어가 있음' "$b" "$(main_ref)"
+}
 
 # ---- 경로 매칭 (접두어가 / 로 끝나면 디렉토리, 아니면 그 파일 또는 그 아래) --------
 path_matches_any() { p="$1"; shift; for prefix in "$@"; do [ -z "$prefix" ] && continue
@@ -87,13 +102,17 @@ claim_get() { sed -n "s/^$2:[[:space:]]*//p" "$1" | head -n1 | sed 's/[[:space:]
 md_section() { awk -v h="## $2" '$0==h{on=1;next} /^## /{on=0} on && NF' "$1"; }
 
 # 다른 브랜치의 claim 순회. 콜백 $1 에 (branch, claim임시파일, ref). 현재·보호·머지된 브랜치 제외.
+# owner 가 나인 브랜치(내 다른 브랜치·워크트리)도 제외한다 — 동료 겹침이 아니다. COLLAB_INCLUDE_MINE=1 이면 포함.
 for_each_other_claim() {
-  me_b="${GITHUB_HEAD_REF:-$(current_branch)}"; seen=" "
+  me_b="${GITHUB_HEAD_REF:-$(current_branch)}"; seen=" "; my_h="$(me)"
   for ref in $(g for-each-ref --format='%(refname:short)' refs/remotes/origin refs/heads 2>/dev/null | grep -v '^origin/HEAD$' | grep -v '^origin$'); do
     b="${ref#origin/}"; [ "$b" = "$me_b" ] && continue; is_protected_branch "$b" && continue
     case "$seen" in *" $b "*) continue ;; esac; ref_merged "$ref" && continue
     fe_tmp="$(mktemp)"
-    if g show "$ref:$(claim_path_for "$b")" > "$fe_tmp" 2>/dev/null && [ -s "$fe_tmp" ]; then seen="$seen$b "; "$1" "$b" "$fe_tmp" "$ref"; fi
+    if g show "$ref:$(claim_path_for "$b")" > "$fe_tmp" 2>/dev/null && [ -s "$fe_tmp" ]; then
+      o="$(claim_get "$fe_tmp" owner)"
+      if [ "$o" != "$my_h" ] || [ -n "${COLLAB_INCLUDE_MINE:-}" ]; then seen="$seen$b "; "$1" "$b" "$fe_tmp" "$ref" "$o"; fi
+    fi
     rm -f "$fe_tmp"
   done
 }
@@ -120,7 +139,7 @@ wip_table() {
   wt_out="$CACHE/wip.tsv"; : > "$wt_out.tmp"; m="$(main_ref)" || m=HEAD; my="$(me)"; now="$(now_epoch)"
   for ref in $(g for-each-ref --format='%(refname)' refs/wip 2>/dev/null); do
     rest="${ref#refs/wip/}"; o="${rest%%/*}"; slug="${rest#*/}"; [ "$rest" = "$o" ] && slug="-"
-    [ "$o" = "$my" ] && [ "$slug" = "$(branch_slug "$(current_branch)")" ] && continue
+    [ "$o" = "$my" ] && continue   # 내 다른 브랜치·워크트리는 동료 겹침이 아니다
     t="$(g log -1 --format=%ct "$ref" 2>/dev/null)" || continue; age=$((now - ${t:-0}))
     [ "$age" -gt "$WIP_STALE_SEC" ] && continue
     parent="$(g rev-parse -q --verify "$ref^" 2>/dev/null || echo "$m")"
@@ -166,7 +185,7 @@ check_write() {
     "$JOURNAL_DIR"/*.md) [ "$(basename "$p")" = README.md ] && return 0
       g cat-file -e "HEAD:$p" 2>/dev/null && { REASON="차단: 저널은 append-only 입니다. 커밋된 $p 를 고치지 말고 새 파일을 추가하세요 ($JOURNAL_DIR/$(today)-$(me)-<slug>.md)."; return 2; } ;;
     "$CLAIM_DIR"/*) [ "$(basename "$p")" = README.md ] && return 0
-      mine="$(claim_dir_for "$branch")"; case "$p" in "$mine"/*) return 0 ;; esac
+      mine="$(claim_dir_for "$branch")"; [ "$p" = "$mine" ] && return 0; case "$p" in "$mine"/*) return 0 ;; esac
       REASON="차단: 다른 브랜치의 claim($p)은 수정하지 않습니다. 내 claim 은 $mine/claim.md."; return 2 ;;
   esac
   path_matches_any "$p" $CLAIM_EXEMPT && return 0

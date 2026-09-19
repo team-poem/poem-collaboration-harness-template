@@ -112,6 +112,19 @@ check "install-into: 하네스 복사 + init, 기존 AGENTS.md 보존"  "[ -f '$
 check "install-into: 두 번 돌려도 안전(멱등)"        "(cd '$SRC' && sh harness/install-into.sh '$X' shop solp >/dev/null 2>&1) && [ -f '$X/scripts/collab.sh' ]"
 rm -rf "$O" "$X"
 
+echo "# 보고된 문제 회귀 (cairn-landing 2인 운영)"
+git switch -q main
+mkdir -p collab/active/feat--mate && printf -- '---\nbranch: feat/mate\nowner: minsu\nstarted: 2026-09-19\nstatus: active\ngoal: mate\n---\n' > collab/active/feat--mate/claim.md
+git add -A && git commit -qm "동료 claim 이 main 에" >/dev/null 2>&1
+git switch -q feat/login
+expect "claim 디렉토리 경로 자신도 내 것 (git add collab/active/<slug>)" guard collab/active/feat--login 0
+check "guard CLI 도 동일"                       "sh scripts/collab.sh guard collab/active/feat--login"
+git config core.hooksPath .githooks
+check "작업 브랜치: main 머지가 동료 claim 때문에 막히지 않음" "git merge --no-edit main >'$W/merge' 2>&1 || { sed 's/^/     /' '$W/merge'; false; }"
+git switch -q main
+check "보호 브랜치: 코드 로컬 머지는 여전히 차단"  "! git merge --no-ff --no-edit feat/login >/dev/null 2>&1; git merge --abort 2>/dev/null; true"
+git config --unset core.hooksPath; git switch -q feat/login
+
 echo "# 설정 일관성: Claude 와 Codex 가 같은 훅 스크립트를 가리키는가"
 c1="$(jq -r '.hooks|to_entries[]|.key+" "+(.value[]|.hooks[]|.command|sub("^\"\\$CLAUDE_PROJECT_DIR\"/";""))' "$SRC/.claude/settings.json" | sort)"
 c2="$(jq -r '.hooks|to_entries[]|.key+" "+(.value[]|.hooks[]|.command)' "$SRC/.codex/hooks.json" | sort)"
@@ -132,7 +145,7 @@ check "main: collab/ 커밋 허용"                "git commit -qm note 2>/dev/n
 git switch -qc feat/hook
 echo x > src/auth/h.ts; git add src/auth/h.ts
 check "claim 없음: 커밋 차단"                  "! git commit -qm x 2>/dev/null"
-mkdir -p collab/active/feat--hook && printf -- '---\nbranch: feat/hook\nowner: me\nstatus: active\ngoal: h\n---\n' > collab/active/feat--hook/claim.md && git add collab/active/feat--hook
+mkdir -p collab/active/feat--hook && printf -- '---\nbranch: feat/hook\nowner: minsu\nstatus: active\ngoal: h\n---\n' > collab/active/feat--hook/claim.md && git add collab/active/feat--hook
 check "claim 과 함께면 커밋 허용"               "git commit -qm claim 2>/dev/null"
 echo edit >> collab/journal/2026-01-01-minsu-old.md; git add collab/journal/2026-01-01-minsu-old.md
 check "기존 저널 수정 커밋 차단"               "! git commit -qm x 2>/dev/null"
@@ -169,7 +182,7 @@ git switch -q --detach
 GITHUB_HEAD_REF=feat/login sh scripts/collab.sh check --base main > "$W/ci-check" 2>&1; ci_rc=$?
 git switch -q feat/login
 # src/auth/b.ts 는 feat/login 에만 있다. 실제 동료 feat/hook 의 겹침(package.json)은 남아야 한다.
-check "check: CI(detached HEAD)에서 자기 브랜치를 남으로 안 봄" "[ \"\$ci_rc\" = 0 ] && ! grep -qF 'src/auth/b.ts(@me)' '$W/ci-check' && grep -qF 'package.json(@me)' '$W/ci-check'"
+check "check: CI(detached HEAD)에서 자기 브랜치를 남으로 안 봄" "[ \"\$ci_rc\" = 0 ] && ! grep -qF 'src/auth/b.ts(@' '$W/ci-check' && grep -qF 'package.json(@minsu)' '$W/ci-check'"
 printf '# bad\n' > collab/journal/2026-01-02-me-feat--login-2.md; git add -A && git commit -qm bad
 check "check: 이벤트 절 없는 저널 실패"     "! sh scripts/collab.sh check --base main >'$W/chk' 2>&1 && grep -q '절 없음' '$W/chk'"
 git reset -q --hard HEAD~1; echo edit >> collab/journal/2026-01-01-minsu-old.md; git add -A && git commit -qm edit-old

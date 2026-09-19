@@ -76,6 +76,8 @@ docs/guide.md             사람용 안내
 | 동료가 지금 **편집 중**(커밋 전)인 허브 파일(HOTSPOTS) | 차단 (`--allow` 로 해제) | 경고 | — |
 | 동료 브랜치에 커밋됐지만 미머지인 파일 · 그 외 겹침 | 알림 (선행 PR 제안) | — | 정보 |
 | 보호 브랜치로 코드 직접 push · 로컬 머지 | — | 차단 (pre-push, pre-merge-commit). 하네스 메타만 바뀐 push 와 첫 publish 는 통과 | GitHub 룰셋: PR 필수, 승인 1명, CI 통과, 관리자 포함 |
+| 이미 머지된 브랜치에 push | digest 경고 | 차단 (pre-push, `COLLAB_ALLOW_MERGED_PUSH=1` 로 해제) | — |
+| 작업 브랜치의 머지 커밋(base 따라잡기) | 통과 — 통합이지 저작이 아니다 | 통과 | — |
 | 코드 변경 있는데 저널 없이 종료 | Stop 훅이 1회 세움 | pre-push 경고 | 저널 없으면 실패 |
 | 루트 `spec.md`·`failed-test.md` 가 PR 에 포함 | — | — | 실패 |
 
@@ -83,7 +85,7 @@ docs/guide.md             사람용 안내
 
 ## 데이터 형식
 
-**claim** — frontmatter 5키 + 선택 `next:`. scope 없음. "영역 점유" 가 아니라 "무엇을 만드는가". `next:` 는 다음에 만질 공유 파일 (동료 세션에 "곧 겹침" 으로 뜬다).
+**claim** — frontmatter 5키 + 선택 `next:`(곧 만질 공유 파일) · `base:`(스택 브랜치의 아래 브랜치. check·pr-body·따라잡기의 기준). scope 없음. "영역 점유" 가 아니라 "무엇을 만드는가". `next:` 는 다음에 만질 공유 파일 (동료 세션에 "곧 겹침" 으로 뜬다).
 ```
 ---
 branch: feat/checkout
@@ -102,6 +104,7 @@ goal: 결제 페이지
 | `added` `dep` `rule` | 항상 |
 | `touching <경로>` | 경로가 내가 만진 파일 |
 | `ask @핸들` | 나를 불렀으면 항상, `reply @상대` 가 내 저널에 생길 때까지 |
+| `supersedes <경로\|낱말>` | 주입 안 함. 같은 owner 의 **앞선** 이벤트 중 그 경로이거나 그 낱말을 포함한 것을 숨긴다 (저널 정정) |
 | `done` `reply` | 주입 안 함 (기록용) |
 
 주입된 이벤트는 브랜치별 `.claude/cache/seen.<slug>` 에 기록돼 다시 뜨지 않는다. `ask` 만 예외.
