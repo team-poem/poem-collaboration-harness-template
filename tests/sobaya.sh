@@ -15,6 +15,10 @@ echo '# Sobaya' > AGENTS.md; git add -A && git commit -qm init
 git init -q --bare "$R/origin.git" && git -C "$R/origin.git" symbolic-ref HEAD refs/heads/main
 A="$WS/apps/shop"; git clone -q "$R/origin.git" "$A" 2>/dev/null; cd "$A" && git switch -qc main 2>/dev/null && git config user.email a@a && git config user.name a && git config collab.me solp && git config collab.onboarded true
 cp -R "$SRC/.claude" "$SRC/.codex" "$SRC/.githooks" "$SRC/harness" "$SRC/collab" "$SRC/scripts" "$SRC/.gitignore" "$SRC/AGENTS.md" . && rm -rf .claude/cache && ln -s AGENTS.md CLAUDE.md
+# 픽스처는 템플릿 자신의 협업 데이터를 물려받지 않는다 (오늘 날짜의 실제 저널이 검사에 섞인다)
+find collab/journal -maxdepth 1 -name '*.md' ! -name README.md -delete 2>/dev/null || true
+rm -rf collab/journal/plans; find collab/active -mindepth 1 -maxdepth 1 -type d -exec rm -rf {} + 2>/dev/null || true
+
 mkdir -p src && echo a > src/a.ts && echo '{}' > package.json && git add -A && git commit -qm init && git push -q origin main
 git switch -qc feat/x && mkdir -p collab/active/feat--x && printf -- '---\nbranch: feat/x\nowner: solp\nstarted: %s\nstatus: active\ngoal: x\n---\n' "$today" > collab/active/feat--x/claim.md && git add -A && git commit -qm claim && git push -q -u origin HEAD
 export CLAUDE_PROJECT_DIR="$A"
@@ -45,10 +49,11 @@ check "claim 있는 브랜치면 루트에서의 Bash 쓰기 통과"     "[ \"\$
 rm -f "$A/.claude/cache/edits"
 rc="$(printf '{"hook_event_name":"PostToolUse","tool_name":"Bash","tool_input":{"command":"tdd-set/bin/loop.sh apps/shop 20"},"cwd":"%s"}' "$WS" | disp >/dev/null 2>&1; echo $?)"
 check "loop.sh apps/shop (슬래시 없음) 도 앱으로 라우팅 → post-edit 카운트" "[ \"\$rc\" = 0 ] && [ -f '$A/.claude/cache/edits' ]"
-cd "$A" && echo n > src/n.ts
+cd "$A" && echo n > src/n.ts && git add -A && git commit -qm "코드 변경" >/dev/null && git push -q origin HEAD
 out="$(printf '{"hook_event_name":"Stop","stop_hook_active":false,"cwd":"%s"}' "$WS" | disp)"
 check "Stop: 앱에 저널 없으면 block 전달"                 "printf '%s' \"\$out\" | grep -q '\"decision\":\"block\"'"
-rm -f src/n.ts
+[ $fail -gt 0 ] && { echo "     진단: out=[$out]"; (cd "$A" && echo "     branch=$(git rev-parse --abbrev-ref HEAD) status=[$(git status --porcelain | tr '\n' ' ' | cut -c1-80)] journals=[$(ls collab/journal/*.md 2>/dev/null | tr '\n' ' ')] direct=[$(printf '{"stop_hook_active":false}' | CLAUDE_PROJECT_DIR="$A" sh harness/hooks/stop.sh)]"); }
+git rm -q src/n.ts >/dev/null 2>&1 && git commit -qm "되돌림" >/dev/null && git push -q origin HEAD
 
 echo "# sobaya 감지와 lock"
 d="$(sh scripts/collab.sh digest)"

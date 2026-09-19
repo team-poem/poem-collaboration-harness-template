@@ -1,5 +1,10 @@
 #!/bin/sh
-# 보호 브랜치에서 로컬 머지(git merge feat/x)로 코드를 들이는 것도 pre-commit 과 같은 규칙으로 막는다.
+# 보호 브랜치에서 로컬 머지로 코드를 들이는 것을 막는다.
+# 작업 브랜치의 머지(main 따라잡기)는 통합이지 저작이 아니므로 통과시킨다 — 동료의 claim·저널이 딸려 들어오는 게 정상이다.
 root="$(git rev-parse --show-toplevel)" || exit 0
-[ -f "$root/scripts/collab.sh" ] && { sh "$root/scripts/collab.sh" precommit || exit 1; }
+[ -f "$root/scripts/collab.sh" ] || exit 0
+br="$(git symbolic-ref --short -q HEAD 2>/dev/null)" || exit 0
+for pb in $(sed -n 's/^PROTECTED_BRANCHES="\(.*\)"/\1/p' "$root/harness/config.sh" 2>/dev/null); do
+  [ "$br" = "$pb" ] && exec sh "$root/scripts/collab.sh" precommit
+done
 exit 0

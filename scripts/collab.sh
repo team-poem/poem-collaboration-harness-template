@@ -84,18 +84,32 @@ digest)
   fetch_note=""; json=0; for a in "$@"; do case "$a" in --fetch) do_fetch 8 && fetch_note="원격 갱신됨" || fetch_note="원격 갱신 실패 — 동료 상태가 오래됐을 수 있음" ;; --json) json=1 ;; esac; done
   wip_table; MYF="$(my_files)"; MINE="$(claim_path_for "$BR")"; lastj="$(my_last_journal_date)"
   # 수집: asks, events, others, overlaps → 임시 파일
-  A="$CACHE/_asks"; E="$CACHE/_events"; O="$CACHE/_others"; V="$CACHE/_overlaps"; : > "$A"; : > "$E"; : > "$O"; : > "$V"
+  A="$CACHE/_asks"; E="$CACHE/_events"; O="$CACHE/_others"; V="$CACHE/_overlaps"; SUP="$CACHE/_sup"; MYB="$CACHE/_mybranches"
+  : > "$A"; : > "$E"; : > "$O"; : > "$V"; : > "$SUP"; : > "$MYB"
   : > "$CACHE/_ids"
   other_journals | sort -t"$TAB" -k2 | while IFS="$TAB" read -r ref j b o; do
     jd="$(basename "$j" | cut -c1-10)"; tmp="$(mktemp)"; g show "$ref:$j" > "$tmp" 2>/dev/null
     md_section "$tmp" "이벤트" | while IFS= read -r line; do
       id="$(event_id "$j|$line")"; grep -qxF "$id" "$CACHE/_ids" && continue; echo "$id" >> "$CACHE/_ids"; ev="$(printf '%s\n' "$line" | parse_event)"; t="${ev%%$TAB*}"; rest="${ev#*$TAB}"; p="${rest%%$TAB*}"; txt="${rest#*$TAB}"
+      if [ "$t" = supersedes ]; then printf '%s\t%s\t%s\n' "$o" "$p" "$txt" >> "$SUP"; continue; fi
       if [ "$t" = ask ] && printf '%s' "$txt" | grep -q "@$ME\b"; then replied "$o" "$jd" || printf '%s\t%s\t%s\t%s\t%s\n' "$id" "$b" "$o" "$j" "$txt" >> "$A"; continue; fi
       printf '%s' "$txt" | grep -q "@$ME\b" && { seen "$id" || printf '%s\t%s\t%s\t%s\t%s %s\n' "$id" "$b" "$o" "$j" "$t" "$txt" >> "$A"; continue; }
       seen "$id" && continue; affects_me "$t" "$p" || continue
       printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$id" "$b" "$o" "$j" "$t" "$p" "$txt" >> "$E"
     done; rm -f "$tmp"
   done
+  # 대체된(supersedes) 이벤트는 뺀다 — 같은 owner 의 나중 저널이 경로나 문구로 지목한 것
+  if [ -s "$SUP" ] && [ -s "$E" ]; then : > "$E.keep"
+    while IFS="$TAB" read -r id b o j t pth txt; do drop=0
+      while IFS="$TAB" read -r so sp stx; do [ "$so" = "$o" ] || continue
+        [ "$sp" != "-" ] && [ "$sp" = "$pth" ] && { drop=1; break; }
+        key="${stx%% *}"; [ -n "$key" ] && { [ "$key" = "$pth" ] && { drop=1; break; }; case "$txt" in *"$key"*) drop=1; break ;; esac; }
+      done < "$SUP"
+      [ $drop = 0 ] && printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$id" "$b" "$o" "$j" "$t" "$pth" "$txt" >> "$E.keep"
+    done < "$E"; mv "$E.keep" "$E"; fi
+  # 내 다른 브랜치 (동료가 아니다 — 목록만 보여준다)
+  _mine() { [ "${4:-}" = "$ME" ] || return 0; printf '%s\t%s\t%s\n' "$1" "$(claim_get "$2" status)" "$(claim_get "$2" goal)" >> "$MYB"; }
+  COLLAB_INCLUDE_MINE=1; for_each_other_claim _mine; unset COLLAB_INCLUDE_MINE
   _others() { o="$(claim_get "$2" owner)"; st="$(claim_get "$2" status)"; slug="$(branch_slug "$1")"; unc=""; com=""; age=""
     [ -f "$CACHE/wip.tsv" ] && line="$(grep "^$o$TAB$slug$TAB" "$CACHE/wip.tsv" | head -n1)" && [ -n "$line" ] && { age="$(printf '%s' "$line" | cut -f3)"; unc="$(printf '%s' "$line" | cut -f4)"; com="$(printf '%s' "$line" | cut -f5)"; }
     last="$(g log -1 --format=%cr "$3" 2>/dev/null)"; days=$(( ( $(now_epoch) - $(g log -1 --format=%ct "$3" 2>/dev/null || echo 0) ) / 86400 ))
@@ -116,6 +130,7 @@ digest)
   else
     echo "# 협업 현황 (자동 주입) · 나: @$ME · 브랜치: ${BR:-?}${fetch_note:+ · $fetch_note}"
     [ "$(g config --get core.hooksPath 2>/dev/null)" = ".githooks" ] || echo "! git 훅이 꺼져 있습니다 → git config core.hooksPath .githooks (커밋·push 검사가 도구와 무관하게 걸린다)"
+    mr="$(branch_merged_reason "$BR" 2>/dev/null)" && echo "! 이 브랜치는 이미 머지됐습니다 ($mr). 여기 더 커밋하지 말고 새 브랜치를 파세요 (push 는 pre-push 가 막습니다)."
     echo; echo "## 나에게 온 질문·메시지 (답은 내 저널 이벤트에 'reply @상대' 로)"
     if [ -s "$A" ]; then while IFS="$TAB" read -r id b o j txt; do echo "- @$o ($b): $txt"; done < "$A"; else echo "- 없음"; fi
     echo; echo "## 내 claim"
@@ -126,6 +141,8 @@ digest)
     if [ -s "$E" ]; then while IFS="$TAB" read -r id b o j t p txt; do echo "- [$t] ${p#-}${p:+ }$txt  (@$o, $b)"; mark_seen "$id"; done < "$E"
       echo "  → changed/migrated/removed 는 내 코드가 깨졌을 수 있다는 뜻. 작업 전에 해당 호출부를 확인한다. added 는 중복 구현 금지. rule 은 따른다."
     else echo "- 없음"; fi
+    if [ -s "$MYB" ]; then echo; echo "## 내 다른 브랜치 (겹침 판정에서 제외됨)"
+      while IFS="$TAB" read -r b st goal; do echo "- $b · $st · $goal"; done < "$MYB"; fi
     echo; echo "## 동료 작업 중"
     if [ -s "$O" ]; then while IFS="$TAB" read -r b o st goal age unc com last nxt; do echo "- $b · @$o · $st · $goal · 마지막 커밋 $last"
         [ "$unc" != "-" ] && echo "  지금 편집 중 ($(fmt_age "$age")): $unc"
@@ -146,7 +163,7 @@ digest)
       echo "  → 같은 부분을 고치는 것 같으면 사용자에게 알린다. 작게 커밋하고 자주 push 한다."
     else echo "- 없음"; fi
   fi
-  rm -f "$A" "$E" "$O" "$V" "$CACHE/_ids"; now_epoch > "$CACHE/pulse.at" ;;
+  rm -f "$A" "$E" "$O" "$V" "$SUP" "$MYB" "$CACHE/_ids"; now_epoch > "$CACHE/pulse.at" ;;
 
 pulse)
   is_protected_branch "$BR" && exit 0
@@ -175,7 +192,14 @@ $a"
     if [ -n "$e" ]; then out="$out
 $e"; sh "$0" digest >/dev/null 2>&1; fi   # 텍스트 digest 를 한 번 돌려 seen 에 기록
   fi
-  # main 보다 뒤처졌으면 따라잡는다 (origin/main 이 언제 바뀌었든, 내 HEAD 에 아직 없으면)
+  # 이 브랜치가 이미 머지됐으면 따라잡지 않는다 (머지된 내용을 다시 들여오면 충돌로 보인다)
+  if reason="$(branch_merged_reason "$BR")"; then
+    [ "$(cat "$MAIN_NOTIFIED" 2>/dev/null)" = "merged" ] || { echo merged > "$MAIN_NOTIFIED"; out="$out
+- 이 브랜치는 이미 머지됐습니다 ($reason). 여기 더 커밋하면 그 PR 에 반영되지 않습니다. 새 브랜치를 파고 cherry-pick 하세요. push 는 pre-push 가 막습니다."; }
+    now_epoch > "$CACHE/pulse.at"; [ -n "$out" ] && printf '%s\n' "$out" | sed '/^$/d'; exit 0; fi
+  # base(기본 main, claim 의 base: 가 있으면 그 브랜치) 보다 뒤처졌으면 따라잡는다
+  SYNC="$MAIN"; cpb="$(claim_path_for "$BR")"; [ -f "$cpb" ] && b2="$(claim_get "$cpb" base)" && [ -n "$b2" ] && g show-ref --verify --quiet "refs/remotes/origin/$b2" && SYNC="origin/$b2"
+  MAIN="$SYNC"
   if [ -n "$MAIN" ]; then newmain="$(g rev-parse "$MAIN" 2>/dev/null)"
     if [ -n "$newmain" ] && ! g merge-base --is-ancestor "$newmain" HEAD 2>/dev/null; then
       mb="$(g merge-base HEAD "$newmain" 2>/dev/null)"; printf '%s\n' "$MYF" > "$CACHE/_myf"
@@ -189,8 +213,10 @@ $e"; sh "$0" digest >/dev/null 2>&1; fi   # 텍스트 digest 를 한 번 돌려 
         if ok_sync; then rm -f "$MAIN_NOTIFIED"; out="$out
 - main 이 갱신되어 자동으로 $mode 했습니다.${hit:+ 내 파일과 겹친 변경: $hit — 다시 확인하세요.}"
         else files="$(g diff --name-only --diff-filter=U 2>/dev/null | tr '\n' ' ')"; undo_sync
+          who=""; for f in $files; do w="$(touching_now "$f" | head -n1 | cut -f1)"; [ -n "$w" ] && who="$who @$w"; done
           out="$out
-- main 과 충돌: $files. 자동 $mode 를 되돌렸습니다. 사용자에게 알리고, 상대 저널의 이벤트를 참고해 'git $mode $MAIN' 으로 직접 해결하세요."; fi
+- $MAIN 과 충돌: $files. 자동 $mode 를 되돌렸습니다 (작업 상태는 그대로).${who:+ 이 파일을 바꾼 동료:$who — 저널 이벤트를 먼저 읽으세요.}
+  직접 해결: git $mode $MAIN → 충돌 해결 → git commit. 겹친 게 내 변경뿐이면 이 브랜치가 이미 머지된 것일 수 있으니 PR 상태를 확인하세요."; fi
       elif [ "$(cat "$MAIN_NOTIFIED" 2>/dev/null)" != "$newmain:pending" ]; then echo "$newmain:pending" > "$MAIN_NOTIFIED"
         out="$out
 - main 이 갱신됐습니다.${hit:+ 내 파일과 겹침: $hit.} 커밋한 뒤 'git $mode $MAIN' 하세요 (작업 트리가 깨끗하면 다음 pulse 가 자동으로 합니다)."; fi
@@ -206,12 +232,29 @@ wip)
     printf '%s\n' "$MYF" | grep -qx "$f" && echo "협업: $f 를 @$o($slug) 도 바꾸는 중" >&2; done; done < "$CACHE/wip.tsv"; exit 0 ;;
 pr-body)
   cp="$(claim_path_for "$BR")"; goal="$( [ -f "$cp" ] && claim_get "$cp" goal)"
-  echo "## 무엇을"; echo "${goal:-<claim goal>}"; echo
-  echo "## 동료가 알아야 할 이벤트"
-  for j in $(ls "$JOURNAL_DIR"/*-"$ME"-*.md 2>/dev/null | sort); do g cat-file -e "$( [ -n "$MAIN" ] && echo "$MAIN" || echo HEAD):$j" 2>/dev/null && continue; md_section "$j" "이벤트" | grep -E '^\s*-\s*(changed|added|removed|migrated|dep|rule)\b'; done | sed 's/^[[:space:]]*//' | sort -u | sed 's/^/- /; s/^- - /- /' | grep . || echo "- 없음"
-  echo; echo "## 다른 열린 브랜치와 겹친 파일"; ov="$(sh "$0" check 2>/dev/null | sed -n 's/^! 다른 열린 브랜치와 같은 파일을 바꿈://p')"; echo "${ov:-없음}"
-  sd="$(g rev-parse --absolute-git-dir 2>/dev/null)/sobaya/state.json"; [ -f "$sd" ] && command -v jq >/dev/null && { echo; echo "## sobaya"; echo "- review 바인딩 HEAD: $(jq -r '.review.head // "없음"' "$sd" 2>/dev/null | cut -c1-7) · 현재 HEAD: $(g rev-parse --short HEAD)"; }
-  echo; echo "## 검증"; echo "<!-- 실제로 돌린 것만 -->"; exit 0 ;;
+  base="$MAIN"; [ -f "$cp" ] && cb="$(claim_get "$cp" base)" && [ -n "$cb" ] && g show-ref --verify --quiet "refs/remotes/origin/$cb" && base="origin/$cb"
+  mb="$(g merge-base "$base" HEAD 2>/dev/null)"
+  echo "## 무엇을"; echo "${goal:-<claim goal>}"
+  [ "$base" != "$MAIN" ] && { echo; echo "> 스택 PR: base 는 \`${base#origin/}\` 입니다. 아래 브랜치가 먼저 머지돼야 합니다."; }
+  echo; echo "## 변경 요약"
+  if [ -n "$mb" ]; then
+    g diff --stat "$mb" HEAD -- . ':!collab' 2>/dev/null | sed '$d' | sed 's/^ *//' | head -n 10 | sed 's/^/- /'
+    tot="$(g diff --shortstat "$mb" HEAD -- . ':!collab' 2>/dev/null | sed 's/^ *//')"; n="$(g diff --name-only "$mb" HEAD -- . ':!collab' 2>/dev/null | grep -c . || echo 0)"
+    [ "$n" -gt 10 ] && echo "- … 외 $((n-10))개 파일"; [ -n "$tot" ] && { echo; echo "$tot"; }
+  else echo "- (base 를 찾을 수 없어 요약 생략)"; fi
+  echo; echo "## 검증"; echo "<!-- 실제로 돌린 것만 -->"
+  ev="$(for j in $(ls "$JOURNAL_DIR"/*-"$ME"-*.md 2>/dev/null | sort); do g cat-file -e "$base:$j" 2>/dev/null && continue; md_section "$j" "이벤트" | grep -E '^\s*-\s*(changed|added|removed|migrated|dep|rule|supersedes)\b'; done | sed 's/^[[:space:]]*-[[:space:]]*/- /' | sort -u | grep . || true)"
+  if [ -n "$ev" ]; then echo; printf '<details><summary>동료 에이전트용 이벤트 (%s줄) — 저널에서</summary>\n\n%s\n\n</details>\n' "$(printf '%s\n' "$ev" | grep -c .)" "$ev"; fi
+  ovf="$CACHE/_prov"; : > "$ovf"
+  _pov() { for f in $(g diff --name-only "$(g merge-base "$base" "$3" 2>/dev/null)" "$3" 2>/dev/null | grep -v '^collab/'); do
+      g diff --name-only "$mb" HEAD -- . ':!collab' 2>/dev/null | grep -qx "$f" && printf -- '- `%s` ← @%s (%s)\n' "$f" "${4:-?}" "$1" >> "$ovf"; done; }
+  [ -n "$mb" ] && for_each_other_claim _pov
+  if [ -s "$ovf" ]; then n="$(grep -c . "$ovf")"; echo
+    printf '<details><summary>다른 열린 브랜치와 겹친 파일 (%s개) — 먼저 머지되는 쪽이 이깁니다</summary>\n\n' "$n"
+    head -n 5 "$ovf"; [ "$n" -gt 5 ] && echo "- … 외 $((n-5))개"; printf '\n</details>\n'; fi
+  rm -f "$ovf"
+  sd="$(g rev-parse --absolute-git-dir 2>/dev/null)/sobaya/state.json"; [ -f "$sd" ] && command -v jq >/dev/null && { echo; echo "<!-- sobaya: review 바인딩 HEAD $(jq -r '.review.head // "없음"' "$sd" 2>/dev/null | cut -c1-7) · 현재 HEAD $(g rev-parse --short HEAD) -->"; }
+  exit 0 ;;
 run)
   [ "${1:-}" = "--" ] && shift; [ $# -gt 0 ] || { echo "사용: collab.sh run -- <명령...>"; exit 1; }
   is_protected_branch "$BR" && { echo "보호 브랜치($BR)에서는 워커를 돌리지 않습니다. start-work 스킬로 브랜치와 claim 을 만드세요." >&2; exit 1; }
@@ -242,8 +285,11 @@ guard)
   p="$(rel_path "${1:-}")" || exit 0; check_write "$p" && exit 0; printf '%s\n' "$REASON" >&2; exit 2 ;;
 
 check)
-  base="$MAIN"; [ "${1:-}" = "--base" ] && base="$2"; [ -n "$base" ] || { echo "base 브랜치를 찾을 수 없음"; exit 1; }
-  branch="${GITHUB_HEAD_REF:-$BR}"; cp="$(claim_path_for "$branch")"; viol=""; V() { viol="$viol$1
+  branch="${GITHUB_HEAD_REF:-$BR}"; cp="$(claim_path_for "$branch")"
+  base="$MAIN"
+  # claim 에 base: 가 있으면 그 브랜치 위에 쌓은 것 (스택 브랜치)
+  [ -f "$cp" ] && cb="$(claim_get "$cp" base)" && [ -n "$cb" ] && g show-ref --verify --quiet "refs/remotes/origin/$cb" && base="origin/$cb"
+  [ "${1:-}" = "--base" ] && base="$2"; [ -n "$base" ] || { echo "base 브랜치를 찾을 수 없음"; exit 1; }; viol=""; V() { viol="$viol$1
 "; }
   is_protected_branch "$branch" && { echo "보호 브랜치 — 검사 생략"; exit 0; }
   mb="$(g merge-base "$base" HEAD 2>/dev/null)" || { echo "merge-base 없음: $base"; exit 1; }
@@ -283,6 +329,9 @@ prune)
 
 precommit)
   [ "$BR" = HEAD ] && exit 0
+  # 머지·체리픽으로 들어온 파일은 "내가 쓴 것" 이 아니다. 작업 브랜치의 통합 커밋은 통과시킨다.
+  # (보호 브랜치의 로컬 머지는 pre-merge-commit 이 따로 막는다)
+  if integrating && ! is_protected_branch "$BR"; then exit 0; fi
   # 허브 파일을 동료가 지금 편집 중이면 경고만 (차단은 sobaya 의 커밋 단계를 깨뜨린다)
   [ -f "$CACHE/wip.tsv" ] && [ $(( $(now_epoch) - $(cat "$CACHE/pulse.at" 2>/dev/null || echo 0) )) -lt 900 ] && g diff --cached --name-only | while IFS= read -r p; do
     is_hotspot "$p" && w="$(editing_now "$p")" && [ -n "$w" ] && echo "주의: 허브 파일 $p 를 $(printf '%s' "$w" | cut -f1 | sed 's/^/@/' | tr '\n' ' ')도 지금 편집 중입니다. 머지 충돌 가능성이 높습니다." >&2; done
@@ -302,7 +351,16 @@ prepush)
         [ $meta_only = 1 ] && continue; fi
       echo "차단: 보호 브랜치 $rb 로 코드를 직접 push 하지 않습니다. 브랜치를 만들어 PR 로 머지하세요. (CI 나 관리자는 COLLAB_ALLOW_PROTECTED_PUSH=1)" >&2; exit 1; done
   fi
-  is_protected_branch "$BR" && exit 0; [ -f "$(claim_path_for "$BR")" ] || exit 0
+  is_protected_branch "$BR" && exit 0
+  if [ -z "${COLLAB_ALLOW_MERGED_PUSH:-}" ] && reason="$(branch_merged_reason "$BR")"; then
+    cat >&2 <<MSG
+차단: 이 브랜치($BR)는 이미 머지됐습니다 ($reason).
+여기에 더 커밋해도 그 PR 에는 반영되지 않습니다. 새 브랜치를 파세요:
+  git switch -c <type>/<slug> $MAIN && git cherry-pick <이 브랜치의 새 커밋들>
+그 뒤 start-work 스킬로 claim 을 만들고 새 PR 을 올립니다. (의도한 push 면 COLLAB_ALLOW_MERGED_PUSH=1)
+MSG
+    exit 1; fi
+  [ -f "$(claim_path_for "$BR")" ] || exit 0
   [ -n "$(my_files | head -n1)" ] || exit 0
   [ -n "$MAIN" ] && g diff --name-only --diff-filter=A "$(g merge-base "$MAIN" HEAD)" HEAD -- "$JOURNAL_DIR" 2>/dev/null | grep -q "^$JOURNAL_DIR/[^/]*-$ME-" && exit 0
   echo "주의: 이 브랜치에 코드 변경이 있는데 내 저널이 없습니다. PR 전에 handoff 스킬(또는 collab/journal/ 에 이벤트 파일)을 남기세요. CI 가 PR 에서 막습니다." >&2; exit 0 ;;

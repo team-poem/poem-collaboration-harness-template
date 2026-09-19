@@ -33,6 +33,8 @@
 ## sobaya 와 함께 쓸 때
 - 이 리포는 각자의 sobaya 워크스페이스 안 `apps/<이름>` 에 클론한다. 처음 한 번 `sh harness/attach-sobaya.sh attach`.
 - sobaya 가 업데이트되면: 아무나 `sh harness/attach-sobaya.sh update` → `harness/sobaya.lock` 커밋 → 나머지는 세션 시작 때 digest 가 "다르다" 고 하면 `sync`. 매주 CI 가 upstream 이 앞서면 이슈를 연다.
+- 스택 PR: 아래 브랜치 위에 쌓을 때 claim 에 `base: <아래 브랜치>` 를 적는다. 그래야 `check` 와 PR 본문이 올바른 기준으로 본다.
+- 머지된 브랜치에는 더 커밋하지 않는다. pre-push 가 막는다 — 새 브랜치를 파고 cherry-pick 한다.
 - `spec.md`·`failed-test.md` 는 브랜치 단위. PR 전에 handoff 가 `collab/journal/plans/` 로 옮긴다. main 에 남기지 않는다.
 
 ## 하네스를 고칠 때

@@ -5,8 +5,13 @@ hook_read_input; hook_reroot
 [ "$(hook_flag stop_hook_active)" = "true" ] && exit 0
 branch="$(current_branch)" || exit 0; is_protected_branch "$branch" && exit 0
 [ -f "$ROOT/$(claim_path_for "$branch")" ] || exit 0
-[ -z "$(my_files | head -n1)" ] && exit 0
+# 동료가 이미 볼 수 있는 변경(push 된 코드)이 있을 때만 세운다.
+# 작업 중간에 사용자 확인을 기다리며 멈추는 것까지 막으면, 끝나지도 않은 작업의 저널을 쓰게 되고
+# 그 저널이 나중에 틀려져 supersedes 로 정정해야 한다 — 인수인계 시점에만 요구한다.
+ref="refs/remotes/origin/$(current_branch)"; g show-ref --verify --quiet "$ref" || exit 0
+m="$(main_ref)" || exit 0
+[ -n "$(g diff --name-only "$(g merge-base "$m" "$ref" 2>/dev/null || echo "$m")" "$ref" -- . ':!collab' 2>/dev/null | head -n1)" ] || exit 0
 ls "$ROOT/$JOURNAL_DIR"/"$(today)"-"$(me)"-*.md >/dev/null 2>&1 && exit 0
-r="이 세션에 코드 변경이 있는데 오늘 내 저널($JOURNAL_DIR/$(today)-$(me)-<slug>.md)이 없습니다. handoff 스킬 로 이벤트와 남은 것을 남기고 push 한 뒤 끝내세요. 사용자가 저널 없이 끝내라고 명시했으면 그대로 끝내도 됩니다."
+r="push 된 코드 변경이 있는데 오늘 내 저널($JOURNAL_DIR/$(today)-$(me)-<slug>.md)이 없습니다. 동료가 이미 이 변경을 볼 수 있습니다. handoff 스킬 로 이벤트와 남은 것을 남기고 push 한 뒤 끝내세요. 사용자가 저널 없이 끝내라고 명시했으면 그대로 끝내도 됩니다."
 if command -v jq >/dev/null 2>&1; then jq -nc --arg r "$r" '{decision:"block",reason:$r}'; else printf '{"decision":"block","reason":"%s"}' "$r"; fi
 exit 0

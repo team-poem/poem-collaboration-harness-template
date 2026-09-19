@@ -38,6 +38,12 @@ jobs:
           git commit -m "chore(collab): prune claims"
           # main 이 보호돼 있으면 직접 push 가 막힌다 → PR 을 열고 auto-merge 로 넘긴다
           if ! COLLAB_ALLOW_PROTECTED_PUSH=1 git push 2>/dev/null; then
-            b="chore/prune-$(date +%Y%m%d-%H%M%S)"; git switch -c "$b" && git push -u origin "$b"
-            gh pr create --title "chore(collab): prune claims" --body "머지된 브랜치의 claim 정리 (CI 자동)" && gh pr merge --auto --squash "$b" || true
+            # main 이 보호돼 있으면 PR 로. 브랜치는 하나를 재사용한다 (매번 새로 만들면 원격에 쌓인다)
+            b="chore/collab-prune"
+            git switch -c "$b" 2>/dev/null || git switch "$b"
+            git push -q -f -u origin "$b"
+            n="$(gh pr list --head "$b" --state open --json number --jq '.[0].number // empty')"
+            if [ -n "$n" ]; then echo "기존 PR #$n 갱신"; else
+              gh pr create --title "chore(collab): prune claims" --body "머지된 브랜치의 claim 정리 (CI 자동). 승인하면 auto-merge 됩니다." && gh pr merge --auto --squash "$b" || true
+            fi
           fi

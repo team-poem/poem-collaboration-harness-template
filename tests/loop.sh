@@ -8,6 +8,10 @@ pass=0; fail=0; check() { if eval "$2"; then pass=$((pass+1)); echo "ok   $1"; e
 git init -q --bare "$R/origin.git" && git -C "$R/origin.git" symbolic-ref HEAD refs/heads/main   # 러너의 기본 브랜치가 master 여도 main 으로
 git clone -q "$R/origin.git" "$R/seed" 2>/dev/null; cd "$R/seed" && git switch -qc main 2>/dev/null
 cp -R "$SRC/.claude" "$SRC/.codex" "$SRC/.githooks" "$SRC/harness" "$SRC/collab" "$SRC/scripts" "$SRC/.gitignore" . && rm -rf .claude/cache
+# 픽스처는 템플릿 자신의 협업 데이터를 물려받지 않는다 (오늘 날짜의 실제 저널이 검사에 섞인다)
+find collab/journal -maxdepth 1 -name '*.md' ! -name README.md -delete 2>/dev/null || true
+rm -rf collab/journal/plans; find collab/active -mindepth 1 -maxdepth 1 -type d -exec rm -rf {} + 2>/dev/null || true
+
 mkdir -p lib/api components/ui app/checkout app/settings prisma && printf 'export function getUser(){}\n' > lib/api/user.ts && echo b > components/ui/button.tsx && echo s > prisma/schema.prisma && echo '{}' > package.json
 git -c user.name=seed -c user.email=s@s add -A && git -c user.name=seed -c user.email=s@s commit -qm init && git push -q origin main
 clone() { git clone -q "$R/origin.git" "$R/$1" && cd "$R/$1" && git config user.name "$1" && git config user.email "$1@t" && git config collab.me "$1"; }
@@ -100,10 +104,70 @@ cd "$R/solp" && git switch -q feat/checkout
 check "다른 브랜치 Y 의 세션에서도 다시 뜸 (브랜치별 seen)" "col solp digest | grep -q '반환형 변경'"
 cd "$R/solp" && git switch -q feat/other
 
+echo "# 내 다른 브랜치는 동료가 아니다 (보고 1·9번)"
+cd "$R/solp" && git switch -qc feat/second origin/main 2>/dev/null && mkdir -p collab/active/feat--second
+printf -- '---\nbranch: feat/second\nowner: solp\nstarted: %s\nstatus: active\ngoal: 두 번째 작업\n---\n' "$today" > collab/active/feat--second/claim.md
+echo second >> components/ui/button.tsx && git add -A && git commit -qm second >/dev/null && git push -q -u origin HEAD
+git switch -q feat/checkout; echo mine >> components/ui/button.tsx
+d="$(col solp digest --fetch)"
+
+check "내 다른 브랜치가 '동료 작업 중' 에 안 뜸"     "! printf '%s' \"\$d\" | grep -q 'feat/second · @solp'"
+check "'내 다른 브랜치' 절에는 뜸"                   "printf '%s' \"\$d\" | grep -A2 '내 다른 브랜치' | grep -q 'feat/second'"
+check "겹침 목록에 내 브랜치가 안 섞임"              "! printf '%s' \"\$d\" | sed -n '/지금 같은 파일/,\$p' | grep -q '@solp'"
+check "check 겹침에도 내 브랜치 제외"                "! col solp check 2>&1 | grep '다른 열린 브랜치' | grep -q '@solp'"
+
+git checkout -q components/ui/button.tsx
+echo "# 저널 정정 supersedes (보고 7번)"
+cd "$R/amazon" && git switch -q feat/again 2>/dev/null
+printf '# 정정\n\n## 이벤트\n- supersedes lib/api/user.ts 반환형은 되돌렸다. 앞 지침 무효\n\n## 남은 것\n- 없음\n' > "collab/journal/$today-amazon-feat--again-2.md"
+git add -A && git commit -qm supersede >/dev/null && git push -q origin HEAD
+cd "$R/solp" && git switch -q feat/other 2>/dev/null || git switch -q feat/checkout
+check "supersedes 뒤에는 낡은 이벤트가 안 뜸"        "! col solp digest --fetch | grep -q '반환형 변경'"
+
+echo "# 스택 브랜치 base (보고 4번)"
+cd "$R/solp" && git switch -qc feat/stacked feat/second 2>/dev/null && mkdir -p collab/active/feat--stacked
+printf -- '---\nbranch: feat/stacked\nowner: solp\nstarted: %s\nstatus: active\ngoal: 스택\nbase: feat/second\n---\n' "$today" > collab/active/feat--stacked/claim.md
+printf '# s\n\n## 이벤트\n- added app/checkout/stacked.tsx x\n\n## 남은 것\n- 없음\n' > "collab/journal/$today-solp-feat--stacked.md"
+echo s > app/checkout/stacked.tsx && git add -A && git commit -qm stacked >/dev/null
+check "base 를 쓰면 아래 브랜치 claim 이 위반으로 안 잡힘" "col solp check >'$R/chk' 2>&1 || { sed 's/^/     /' '$R/chk'; false; }"
+check "check 가 base 를 표시"                        "grep -q 'base origin/feat/second' '$R/chk'"
+
+echo "# PR 본문 (보고 2·3번)"
+b="$(col solp pr-body)"
+check "본문 앞쪽이 goal·변경 요약·검증"              "printf '%s' \"\$b\" | grep -q '## 변경 요약' && printf '%s' \"\$b\" | grep -q '## 검증'"
+check "이벤트는 details 로 접힘"                     "printf '%s' \"\$b\" | grep -q '<details><summary>동료 에이전트용 이벤트'"
+check "스택 PR 은 base 를 본문에 알림"               "printf '%s' \"\$b\" | grep -q '스택 PR'"
+check "어떤 줄도 200자를 넘지 않음"                  "[ \"\$(printf '%s' \"\$b\" | awk '{print length}' | sort -rn | head -1)\" -lt 200 ]"
+
+echo "# 머지된 브랜치 (보고 8번, 새 발견)"
+cd "$R/amazon" && git switch -q main && git fetch -q origin && git pull -q --ff-only origin main 2>/dev/null; git merge -q --squash origin/feat/second && git commit -qm "feat: second (squash)" >/dev/null && git push -q origin main
+cd "$R/solp" && git switch -q feat/second && git fetch -q origin
+check "digest 가 머지됐다고 경고"                    "col solp digest --fetch | grep -q '이미 머지됐습니다'"
+check "pulse 가 따라잡지 않고 알림"                  "col solp pulse | grep -q '이미 머지됐습니다'"
+echo extra >> components/ui/button.tsx && git add -A && git commit -qm "머지 뒤 추가 커밋" >/dev/null
+check "pre-push 가 push 를 막음"                     "! sh scripts/collab.sh prepush </dev/null >/dev/null 2>'$R/err'; grep -q '이미 머지됐습니다' '$R/err'"
+check "COLLAB_ALLOW_MERGED_PUSH=1 이면 통과"          "COLLAB_ALLOW_MERGED_PUSH=1 sh scripts/collab.sh prepush </dev/null >/dev/null 2>&1"
+git switch -q feat/checkout
+
 echo "# check 와 stop"
 cd "$R/solp" && git switch -q feat/checkout && rm -f app/checkout/x.ts
 check "check: 다른 열린 브랜치와 같은 파일 알림" "col solp check | grep -q 'button.tsx(@amazon)' || col solp check | grep -q 'user.ts(@amazon)'"
-cd "$R/solp" && rm "collab/journal/$today-solp-feat--checkout.md" && git add -A && git commit -qm rmj -q && echo n > app/checkout/n.tsx
+cd "$R/solp" && rm -f "collab/journal/$today-solp-"*.md && git add -A && { git commit -qm rmj || true; }
+# 아직 코드를 push 하지 않은 새 브랜치에서 (보고 11번: 작업 중간 정지는 안 세운다)
+git switch -qc feat/fresh origin/main 2>/dev/null && mkdir -p collab/active/feat--fresh app/fresh
+printf -- '---\nbranch: feat/fresh\nowner: solp\nstarted: %s\nstatus: active\ngoal: 새 작업\n---\n' "$today" > collab/active/feat--fresh/claim.md
+git add collab && git commit -qm claim -q && git push -q -u origin HEAD
+echo n > app/fresh/n.tsx
 out="$(printf '{"stop_hook_active":false}' | hook solp stop)"
-check "stop: 변경 있고 저널 없음 → block"     "printf '%s' \"\$out\" | grep -q '\"decision\":\"block\"'"
+check "stop: 미커밋 변경만 있으면 안 세움 (보고 11번)" "[ -z \"\$out\" ]"
+git add -A && git commit -qm "작업 커밋" -q
+out="$(printf '{"stop_hook_active":false}' | hook solp stop)"
+check "stop: 커밋만 하고 push 안 했으면 안 세움"       "[ -z \"\$out\" ]"
+git push -q origin HEAD
+out="$(printf '{"stop_hook_active":false}' | hook solp stop)"
+check "stop: push 된 코드 변경 + 저널 없음 → block"    "printf '%s' \"\$out\" | grep -q '\"decision\":\"block\"'"
+printf '# j\n\n## 이벤트\n- done app/fresh/ 끝\n\n## 남은 것\n- 없음\n' > "collab/journal/$today-solp-feat--fresh.md"
+out="$(printf '{"stop_hook_active":false}' | hook solp stop)"
+check "stop: 저널을 쓰면 통과"                         "[ -z \"\$out\" ]"
+[ $fail -gt 0 ] && { echo "     진단: branch=$(git rev-parse --abbrev-ref HEAD) 오늘저널=[$(ls collab/journal/$today-solp-*.md 2>/dev/null | tr '\n' ' ')] my_files=[$( . harness/hooks/lib.sh; my_files | tr '\n' ' ' | cut -c1-120)] out=[$out]"; }
 echo; echo "통과 $pass / 실패 $fail"; [ $fail -eq 0 ]
