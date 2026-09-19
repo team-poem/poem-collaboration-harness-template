@@ -78,7 +78,8 @@ docs/guide.md             사람용 안내
 | 보호 브랜치로 코드 직접 push · 로컬 머지 | — | 차단 (pre-push, pre-merge-commit). 하네스 메타만 바뀐 push 와 첫 publish 는 통과 | GitHub 룰셋: PR 필수, 승인 1명, CI 통과, 관리자 포함 |
 | 이미 머지된 브랜치에 push | digest 경고 | 차단 (pre-push, `COLLAB_ALLOW_MERGED_PUSH=1` 로 해제) | — |
 | 작업 브랜치의 머지 커밋(base 따라잡기) | 통과 — 통합이지 저작이 아니다 | 통과 | — |
-| 코드 변경 있는데 저널 없이 종료 | Stop 훅이 1회 세움 | pre-push 경고 | 저널 없으면 실패 |
+| **push 된** 코드 변경이 있는데 저널 없이 종료 | Stop 훅이 1회 세움 (미커밋·미push 중간 정지는 안 세움) | pre-push 경고 | 저널 없으면 실패 |
+| 되돌리기 (`git checkout --` · `restore` · `stash`) | 통과 — 커밋 상태로 되돌리는 것이라 새 위반을 만들 수 없다 | 통과 | — |
 | 루트 `spec.md`·`failed-test.md` 가 PR 에 포함 | — | — | 실패 |
 
 훅이 못 잡은 것은 CI 가 잡는다. 훅이 안 붙는 도구에서는 `digest`·`pulse` 를 직접 부른다 (AGENTS.md §0).

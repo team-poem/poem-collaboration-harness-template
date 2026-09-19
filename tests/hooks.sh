@@ -129,6 +129,22 @@ git switch -q main
 check "보호 브랜치: 코드 로컬 머지는 여전히 차단"  "! git merge --no-ff --no-edit feat/login >/dev/null 2>&1; git merge --abort 2>/dev/null; true"
 git config --unset core.hooksPath; git switch -q feat/login
 
+echo "# 되돌리기·따옴표 (보고 10번)"
+git switch -q feat/login
+expect_bash "git checkout -- 로 되돌리기는 통과"      "git checkout -- collab/journal/2026-01-01-minsu-old.md" 0
+expect_bash "git restore 로 되돌리기는 통과"          "git restore collab/journal/2026-01-01-minsu-old.md" 0
+expect_bash "git restore --staged 도 통과"            "git restore --staged collab/journal/2026-01-01-minsu-old.md" 0
+expect_bash "git stash 통과"                          "git stash" 0
+expect_bash "git rm 으로 저널 삭제는 여전히 차단"      "git rm collab/journal/2026-01-01-minsu-old.md" 2
+printf 'minsu\tfeat--pay\t90\tpackage.json\t-\n' > .claude/cache/wip.tsv
+expect_bash "허브 파일: 따옴표로 감싸도 차단(우회 없음)" "echo x > 'package.json'" 2
+expect_bash "허브 파일: 큰따옴표도 차단"                'echo x > "package.json"' 2
+expect_bash "따옴표 안의 > 는 여전히 쓰기 아님"          "echo 'a>b' | cat" 0
+rm -f .claude/cache/wip.tsv
+
+echo "# 하위 디렉토리에서 lib.sh 를 직접 source 해도 리포를 찾는가 (보고 메타)"
+check "CLAUDE_PROJECT_DIR 없이도 ROOT 가 리포 루트" "(cd '$T/src' && unset CLAUDE_PROJECT_DIR; . '$T/harness/hooks/lib.sh'; [ \"\$ROOT\" = '$T' ])"
+
 echo "# 설정 일관성: Claude 와 Codex 가 같은 훅 스크립트를 가리키는가"
 c1="$(jq -r '.hooks|to_entries[]|.key+" "+(.value[]|.hooks[]|.command|sub("^\"\\$CLAUDE_PROJECT_DIR\"/";""))' "$SRC/.claude/settings.json" | sort)"
 c2="$(jq -r '.hooks|to_entries[]|.key+" "+(.value[]|.hooks[]|.command)' "$SRC/.codex/hooks.json" | sort)"

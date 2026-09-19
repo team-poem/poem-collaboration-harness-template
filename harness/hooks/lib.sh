@@ -9,7 +9,9 @@ find_root_from() {
     [ -d "$d/collab" ] && [ -e "$d/.git" ] && { printf '%s' "$d"; return 0; }
     d="$(dirname "$d")"; done; return 1
 }
-ROOT="${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
+ROOT="${CLAUDE_PROJECT_DIR:-}"
+# 환경변수가 없으면 현재 위치에서 위로 올라가 하네스를 가진 리포를 찾는다. 그래도 없으면 git 루트 → pwd.
+[ -n "$ROOT" ] || ROOT="$(find_root_from "$(pwd -P)" 2>/dev/null)" || ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || ROOT="$(pwd)"
 ROOT="$(_norm_dir "$ROOT" || printf '%s' "$ROOT")"
 load_config() {
   # shellcheck disable=SC1091
@@ -208,11 +210,16 @@ check_write() {
 # Bash 명령에서 쓰기 대상 경로를 뽑아 check_write. 완벽하지 않다 — CI 의 check 가 최종 방어선.
 check_command() {
   cmd="$1"; REASON=""
-  case "$cmd" in *scripts/collab.sh*|*harness/init.sh*|*tests/hooks.sh*|*tests/loop.sh*) return 0 ;; esac
+  case "$cmd" in *scripts/collab.sh*|*harness/init.sh*|*tests/hooks.sh*|*tests/loop.sh*|*tests/sobaya.sh*) return 0 ;; esac
+  # 되돌리기 계열은 작업 트리를 커밋 상태로 되돌린다 — 정의상 새 위반을 만들 수 없고,
+  # 오히려 위반을 고치는 수단이므로 막으면 빠져나갈 길이 없어진다.
+  printf '%s' "$cmd" | grep -Eq '(^|[;&|[:space:]])git[[:space:]]+(stash|restore|checkout[[:space:]]+(--|[^[:space:]]+[[:space:]]+--))' && return 0
   scrub="$(printf '%s' "$cmd" | sed -e "s/'[^']*'/''/g" -e 's/"[^"]*"/""/g' -e 's/2>&1//g; s/2>>\{0,1\}[^ ]*//g; s/>&[0-9]//g; s/[12]\{0,1\}>>\{0,1\}[[:space:]]*\/dev\/null//g; s/>>\{0,1\}[[:space:]]*[^ ]*\.log\b//g')"
   printf '%s' "$scrub" | grep -Eq '(^|[^<>|&])>{1,2}[[:space:]]*[^&[:space:]]|(^|[;&|[:space:]])(tee|mv|cp|rm|rmdir|install|truncate|dd|ln)[[:space:]]|(^|[;&|[:space:]])sed[[:space:]]+(-[a-zA-Z]*i|--in-place)|git[[:space:]]+(apply|mv|rm|checkout[[:space:]]+--|restore)|(^|[;&|[:space:]])(python3?|node|perl|ruby)[[:space:]].*(open\(|writeFile|File\.write|>[[:space:]]*[^&])' || return 0
   branch="$(current_branch)" || return 0
-  paths="$(printf '%s' "$scrub" | tr ' ;|&()<>"'"'"'`' '\n' | grep -E '^[A-Za-z0-9_./~-]+$' | grep -v '^-' | grep -v '^[0-9.]*$' | sort -u)"
+  # 쓰기 여부는 scrub(따옴표 제거본)으로 판정하지만, 경로는 원본에서 뽑는다.
+  # scrub 에서 뽑으면 'path' 처럼 따옴표로 감싼 경로가 사라져 guard 가 통째로 우회된다.
+  paths="$(printf '%s' "$cmd" | tr ' ;|&()<>"'"'"'`' '\n' | grep -E '^[A-Za-z0-9_./~-]+$' | grep -v '^-' | grep -v '^[0-9.]*$' | sort -u)"
   blocked=""; found=0
   for t in $paths; do
     case "$t" in ~*|/dev/*|/tmp/*|/private/tmp/*|*://*) continue ;; esac
